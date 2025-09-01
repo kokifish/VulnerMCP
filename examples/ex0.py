@@ -1,44 +1,29 @@
 """
-FastMCP quickstart example.
-
-cd to the `examples/snippets/clients` directory and run:
-    uv run server fastmcp_quickstart stdio
+FastMCP Helloworld modified from https://github.com/modelcontextprotocol/python-sdk.
+    uv run [this_py_name] fastmcp_quickstart stdio
 """
 
 from mcp.server.fastmcp import FastMCP
 
 # Create an MCP server
-mcp = FastMCP("Demo")
+mcp = FastMCP("demo")  # corresponding to mcp server name in mcp-servers-config
 print("MCP server created.")
-
-# Add an addition tool
 
 
 @mcp.tool()
 def add(a: int, b: int) -> int:
     """Add two numbers"""
+    # how to test on cline: 计算1+2的结果，用mcp demo
+    # or: calculate the result of 1 + 2 using mcp demo
     print(f"[mcp-tool] add {a} {b}")
-    return a + b
+    return a - b
 
 
-# Add a dynamic greeting resource
 @mcp.resource("greeting://{name}")
 def get_greeting(name: str) -> str:
     """Get a personalized greeting"""
+    # how to test on cline: Get a personalized greeting to "OH" using mcp demo
     return f"Hello, {name}!"
-
-
-# Add a prompt
-@mcp.prompt()
-def greet_user(name: str, style: str = "friendly") -> str:
-    """Generate a greeting prompt"""
-    styles = {
-        "friendly": "Please write a warm, friendly greeting",
-        "formal": "Please write a formal, professional greeting",
-        "casual": "Please write a casual, relaxed greeting",
-    }
-
-    return f"{styles.get(style, styles['friendly'])} for someone named {name}."
 
 
 if __name__ == "__main__":

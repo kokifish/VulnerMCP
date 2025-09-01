@@ -1,0 +1,74 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/koki/git_space/"
+      ],
+      "autoApprove": []
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git"
+      ],
+      "autoApprove": [
+        "git_status"
+      ]
+    },
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time"
+      ],
+      "autoApprove": [
+        "get_current_time",
+        "add"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "autoApprove": [
+        "create_entities"
+      ]
+    },
+    "everything": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ],
+      "autoApprove": [
+        "echo"
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "autoApprove": [
+        "fetch"
+      ]
+    },
+    "demo": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/koki/git_space/VulnerMCP/examples",
+        "run",
+        "ex0.py"
+      ],
+      "autoApprove": [
+        "add",
+        "greeting"
+      ]
+    }
+  }
+}

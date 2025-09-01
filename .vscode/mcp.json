@@ -14,6 +14,32 @@
 			"args": [
 				"mcp-server-git"
 			]
+		},
+		"time": {
+			"command": "uvx",
+			"args": [
+				"mcp-server-time"
+			]
+		},
+		"memory": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-memory"
+			]
+		},
+		"everything": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-everything"
+			]
+		},
+		"fetch": {
+			"command": "uvx",
+			"args": [
+				"mcp-server-fetch"
+			]
 		}
 	},
 	"inputs": []

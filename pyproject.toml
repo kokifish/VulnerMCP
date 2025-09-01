@@ -1,9 +1,9 @@
 [project]
 name = "vulnermcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP servers aim to vulnerability research and exploit development."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "mcp[cli]>=1.13.1",
     "numba>=0.61.2",
