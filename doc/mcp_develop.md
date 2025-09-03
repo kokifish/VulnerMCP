@@ -448,10 +448,229 @@ The request context accessible via `ctx.request_context` contains request-specif
 
 ## Running MCP Server
 
-> 大致分为
+> 大致分为这几种：
+>
+> - Claude Install: `uv run mcp install server.py`
+> - MCP Inspector: `uv run mcp dev server.py [--with pandas --with numpy] [--with-editable .]`
+> - Direct Execution: `python server.py` or `uv run mcp run server.py` 不支持low-level server variant，只支持`FastMCP`
+> - HTTP
 
-### Develop Mode
+### Develop Mode: Inspector
 
-### Direct Execution
+The fastest way to test and debug your server is with the MCP Inspector:
+
+```bash
+uv run mcp dev server.py
+
+# Add dependencies
+uv run mcp dev server.py --with pandas --with numpy
+
+# Mount local code
+uv run mcp dev server.py --with-editable .
+```
+
+## Advanced Usage
+
+### Low-Level Server
+
+> Caution: The `uv run mcp run` and `uv run mcp dev` tool doesn't support low-level server.
+
+#### Structured Output Support
+
+```python
+"""
+Run from the repository root:
+    uv run examples/snippets/servers/lowlevel/structured_output.py
+"""
+
+import asyncio
+from typing import Any
+
+import mcp.server.stdio
+import mcp.types as types
+from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
+
+server = Server("example-server")
+
+
+@server.list_tools()
+async def list_tools() -> list[types.Tool]:
+    """List available tools with structured output schemas."""
+    return [ # List of Tool
+        types.Tool(
+            name="get_weather",  # tool的函数名
+            description="Get current weather for a city",
+            inputSchema={  # LLM调MCP Server tool的入参
+                "type": "object",
+                "properties": {"city": {"type": "string", "description": "City name"}},
+                "required": ["city"],  # 必选参数
+            },
+            outputSchema={
+                "type": "object",  # 指定 Structured data only
+                "properties": {
+                    "temperature": {"type": "number", "description": "Temperature in Celsius"},
+                    "condition": {"type": "string", "description": "Weather condition"},
+                    "humidity": {"type": "number", "description": "Humidity percentage"},
+                    "city": {"type": "string", "description": "City name"},
+                },
+                "required": ["temperature", "condition", "humidity", "city"],  # 必选字段
+            },
+        )
+    ]
+
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Handle tool calls with structured output."""
+    if name == "get_weather":  # 这个name对应FastMCP @mcp.tool()的函数名
+        city = arguments["city"]
+
+        # Simulated weather data - in production, call a weather API
+        weather_data = {
+            "temperature": 22.5,
+            "condition": "partly cloudy",
+            "humidity": 65,
+            "city": city,  # Include the requested city
+        }
+
+        # low-level server will validate structured output against the tool's
+        # output schema, and additionally serialize it into a TextContent block
+        # for backwards compatibility with pre-2025-06-18 clients.
+        return weather_data
+    else:
+        raise ValueError(f"Unknown tool: {name}")
+
+
+async def run():
+    """Run the structured output server."""
+    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            InitializationOptions(
+                server_name="structured-output-example",
+                server_version="0.1.0",
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
+                ),
+            ),
+        )
+
+
+if __name__ == "__main__":
+    asyncio.run(run())
+```
+
+Tools can return data in three ways:
+
+1. **Content only**: Return a list of content blocks (default behavior before spec revision 2025-06-18)
+2. **Structured data only**: Return a dictionary that will be serialized to JSON (Introduced in spec revision 2025-06-18)
+3. **Both**: Return a tuple of (content, structured_data) preferred option to use for backwards compatibility
+
+When an `outputSchema` is defined, the server automatically validates the structured output against the schema. This ensures type safety and helps catch errors early. 如果定义了`outputSchema`，server会用schema自动验证结构化输出，以确保类型安全。
+
+### MCP Clients
+
+### Parsing Tool Results
+
+When calling tools through MCP, the `CallToolResult` object contains the tool's response in a structured format. Understanding how to parse this result is essential for properly handling tool outputs.
+
+```python
+"""examples/snippets/clients/parsing_tool_results.py"""
+
+import asyncio
+
+from mcp import ClientSession, StdioServerParameters, types
+from mcp.client.stdio import stdio_client
+
+
+async def parse_tool_results():
+    """Demonstrates how to parse different types of content in CallToolResult."""
+    server_params = StdioServerParameters(
+        command="python", args=["path/to/mcp_server.py"]
+    )
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            # Example 1: Parsing text content
+            result = await session.call_tool("get_data", {"format": "text"})
+            for content in result.content:
+                if isinstance(content, types.TextContent):  # 非结构化输出
+                    print(f"Text: {content.text}")
+
+            # Example 2: Parsing structured content from JSON tools
+            result = await session.call_tool("get_user", {"id": "123"})
+            if hasattr(result, "structuredContent") and result.structuredContent:  # 结构化输出
+                # Access structured data directly
+                user_data = result.structuredContent
+                print(f"User: {user_data.get('name')}, Age: {user_data.get('age')}")
+
+            # Example 3: Parsing embedded resources
+            result = await session.call_tool("read_config", {})
+            for content in result.content:
+                if isinstance(content, types.EmbeddedResource):  # 嵌套资源的server对应代码是什么？
+                    resource = content.resource
+                    if isinstance(resource, types.TextResourceContents):
+                        print(f"Config from {resource.uri}: {resource.text}")
+                    elif isinstance(resource, types.BlobResourceContents):
+                        print(f"Binary data from {resource.uri}")
+
+            # Example 4: Parsing image content
+            result = await session.call_tool("generate_chart", {"data": [1, 2, 3]})
+            for content in result.content:
+                if isinstance(content, types.ImageContent):  # 前面提到的mcp的Image组件
+                    print(f"Image ({content.mimeType}): {len(content.data)} bytes")
+
+            # Example 5: Handling errors
+            result = await session.call_tool("failing_tool", {})
+            if result.isError:
+                print("Tool execution failed!")
+                for content in result.content:
+                    if isinstance(content, types.TextContent):
+                        print(f"Error: {content.text}")
+
+
+async def main():
+    await parse_tool_results()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### MCP Primitives
+
+The MCP protocol defines three core primitives that servers can implement:
+
+| Primitive | Control                | Description                                       | Example Use                  |
+| --------- | ---------------------- | ------------------------------------------------- | ---------------------------- |
+| Prompts   | User-controlled        | Interactive templates invoked by user choice      | Slash commands, menu options |
+| Resources | Application-controlled | Contextual data managed by the client application | File contents, API responses |
+| Tools     | Model-controlled       | Functions exposed to the LLM to take actions      | API calls, data updates      |
+
+- Prompts: 用户控制，用户选择的交互模板
+
+### Server Capabilities
+
+MCP服务器功能
+
+MCP servers declare capabilities during initialization:
+
+| Capability    | Feature Flag              | Description                     |
+| ------------- | ------------------------- | ------------------------------- |
+| `prompts`     | `listChanged`             | Prompt template management      |
+| `resources`   | `subscribe` `listChanged` | Resource exposure and updates   |
+| `tools`       | `listChanged`             | Tool discovery and execution    |
+| `logging`     | -                         | Server logging configuration    |
+| `completions` | -                         | Argument completion suggestions |
+
+
 
 ## An All-in-One demo
+
+### Stdio MCP Server
+
