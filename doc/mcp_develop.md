@@ -4,6 +4,13 @@
 >
 > [Quick Start Video on X](https://x.com/sdrzn/status/1867271665086074969) use cline on UI and config for mcp servers
 
+1. 用户向LLM提问
+2. LLM分析问题，分析已有MCP server和MCP tools，决定调用MCP tool。（不调用的就和MCP无关了）
+3. MCP client调用MCP server tool
+4. MCP server tool返回结果，这里的结果是先返回给MCP client还是MCP server？
+
+
+
 ```bash
 uv run mcp install main.py # install for Claude Desktop
 uv run mcp dev main.py # Run a MCP server with the MCP Inspector
@@ -667,6 +674,88 @@ MCP servers declare capabilities during initialization:
 | `tools`       | `listChanged`             | Tool discovery and execution    |
 | `logging`     | -                         | Server logging configuration    |
 | `completions` | -                         | Argument completion suggestions |
+
+## Architecture Overview
+
+
+
+## Server Concepts
+
+
+
+## Client Concepts
+
+
+
+
+
+## Usage Settings
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {  // A friendly name for the server that appears in Claude Desktop // 需要对应 mcp server中的名字 FastMCP(xx)
+      "command": "npx",  // Uses Node.js’s npx tool to run the server
+      "args": [
+        "-y",  // Automatically confirms the installation of the server package
+        "@modelcontextprotocol/server-filesystem",  // The package name of the Filesystem Server
+        "/Users/username/Desktop",  // Directories the server is allowed to access // 取决于具体的mcp server需要什么参数
+        "/Users/username/Downloads"  // 这里代表 filesystem 允许访问的路径
+      ]
+    },
+    "weather": {  // 需要和 mcp server 名字对应，即使用类似 FastMCP("weather") 的方式创建 mcp server
+      "command": "uv",  // 使用uv
+      "args": [
+        "--directory",
+        "/ABSOLUTE/PATH/TO/PARENT/FOLDER/weather",  // mcp server的绝对路径
+        "run",
+        "weather.py"  // mcp server入口, FastMCP(xxx)所在的地方
+      ]
+    }
+  }
+}
+```
+
+
+
+## Server Development
+
+- Python >= 3.10
+- stdio的map server不可以使用python` print`这种写入到stdio的输出。For STDIO-based server, never write to standard output (stdout). Writing to stdout will corrupt the JSON-RPC messages and break your server.
+
+## Debugging
+
+> https://modelcontextprotocol.io/legacy/tools/debugging
+
+- **MCP Inspector**: UI界面的server测试
+
+- **Claude Desktop Developer Tools**: 集成测试、chrome DevTools集成测试. MCP logs from Claude Desktop: `tail -n 20 -F ~/Library/Logs/Claude/mcp*.log`
+
+- **Server Logging**: 自定义logging实现、性能监控
+
+
+
+### Inspector
+
+> https://modelcontextprotocol.io/legacy/tools/inspector
+
+用于调试MCP server的可交互式UI工具
+
+```bash
+npx @modelcontextprotocol/inspector <command>
+npx @modelcontextprotocol/inspector <command> <arg1> <arg2>
+npx -y @modelcontextprotocol/inspector npx <package-name> <args>  # 调试发布到npm的包
+npx -y @modelcontextprotocol/inspector npx @modelcontextprotocol/server-filesystem /Users/username/Desktop  # https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem
+npx @modelcontextprotocol/inspector uvx <package-name> <args>  # 调剂发布到PyPi的包
+npx @modelcontextprotocol/inspector uvx mcp-server-git --repository ~/code/mcp/servers.git
+
+npx @modelcontextprotocol/inspector node path/to/server/index.js args... # Local TypeScript mcp server
+npx @modelcontextprotocol/inspector uv --directory path/to/server run package-name args...  # Local python mcp server
+```
+
+
+
+## Client Development
 
 
 

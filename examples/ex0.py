@@ -7,7 +7,7 @@ from mcp.server.fastmcp import FastMCP
 
 # Create an MCP server
 mcp = FastMCP("demo")  # corresponding to mcp server name in mcp-servers-config
-print("MCP server created.")
+# print("MCP server created.")
 
 
 @mcp.tool()
