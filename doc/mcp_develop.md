@@ -739,7 +739,7 @@ MCP servers declare capabilities during initialization:
 
 > https://modelcontextprotocol.io/legacy/tools/inspector
 
-用于调试MCP server的可交互式UI工具
+用于调试MCP server的可交互式UI工具。
 
 ```bash
 npx @modelcontextprotocol/inspector <command>
@@ -752,6 +752,9 @@ npx @modelcontextprotocol/inspector uvx mcp-server-git --repository ~/code/mcp/s
 npx @modelcontextprotocol/inspector node path/to/server/index.js args... # Local TypeScript mcp server
 npx @modelcontextprotocol/inspector uv --directory path/to/server run package-name args...  # Local python mcp server
 ```
+
+- Server connection pane: 左侧，展示/设定传输类型、启动命令、环境变量
+- 功能测试：上方选择各种MCP server暴露的接口的测试子介面，Resource, Prompts, Tools等。中间是测试发起的按钮，对应server暴露的接口的调用测试。或者有其他方式发起的测试的log
 
 
 
