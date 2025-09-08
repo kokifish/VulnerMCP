@@ -9,15 +9,11 @@
 3. MCP client调用MCP server tool
 4. MCP server tool返回结果，这里的结果是先返回给MCP client还是MCP server？
 
-
-
 ```bash
 uv run mcp install main.py # install for Claude Desktop
 uv run mcp dev main.py # Run a MCP server with the MCP Inspector
 uv run mcp --help # show cmd help
 ```
-
-
 
 ## Environment Preparation
 
@@ -30,8 +26,6 @@ An example in vscode and cline:
 
 > If a wrong LLM used in adding a new mcp server with cline task chat window, mcp servers maybe installed failed. XD
 >
-
-
 
 ## Usage Settings
 
@@ -60,23 +54,158 @@ An example in vscode and cline:
 }
 ```
 
-
-
 ---
 
 ## Architecture
 
+> MCP Host <- One-to-Many -> MCP Client <- One-to-One -> MCP Server
 
+- **MCP Host**: The AI application that coordinates and manages one or multiple MCP clients. 宿主，管理多个MCP clients。例如Claude、Cline
+- **MCP Client**: A component that maintains a connection to an MCP server and obtains context from an MCP server for the MCP host to use. MCP客户端用于维护与MCP server的连接，并负责MCP Server和Host之间的通信。
+- **MCP Server**: A program that provides context to MCP clients. 一个给MCP client提供上下文的程序。这里的上下文指给Host的信息，与MCP server参数中的Context不是同一个东西。
 
+MCP包括两个层：数据层 Data Layer 和传输层 Transport Layer。
 
+- **Data Layer 数据层**：定义了基于JSON-RPC 2.0的客户端-服务器通信协议，including lifecycle management, and core primitives, such as tools, resources, prompts and notifications.。
+- **Transport Layer 传输层**：定义客户端-服务器剪的信息交换机制和渠道。Defines the communication mechanisms and channels that enable data exchange between clients and servers, including transport-specific connection establishment, message framing, and authorization.
 
+### Layer: Data Layer
 
+> 决定了MCP server如何向MCP client上下文。进而很大程度上决定如何向AI传递上下文。
+
+数据层实现了一个基于JSON-RPC 2.0的定义了消息格式、语义的数据交换协议。The data layer implements a [JSON-RPC 2.0](https://www.jsonrpc.org/) based exchange protocol that defines the message structure and semantics. This layer includes:
+
+- **Lifecycle management**: Handles connection initialization, capability negotiation, and connection termination between clients and servers. 连接初始化、能力协商、连接终止。
+- **Server features**: Enables servers to provide core functionality including tools for AI actions, resources for context data, and prompts for interaction templates from and to the client
+- **Client features**: Enables servers to ask the client to sample from the host LLM, elicit input from the user, and log messages to the client
+- **Utility features**: Supports additional capabilities like notifications for real-time updates and progress tracking for long-running operations
+
+> JSON-RPC 2.0: 轻量、语言无关、传输层无关（可用HTTP TCP WebSocket）、支持通知（client可发送无需server响应的notification）、支持批量请求（Batch，允许一个消息发送多个请求/通知，server会逐个处理并响应）、标准化错误处理
+>
+> ```json
+> {  // Request
+>     "jsonrpc": "2.0",
+>     "method": "method_name",
+>     "params": [param1, param2] | {"param1": value1, "param2": value2},
+>     "id": id_value  // 用于唯一标识一个请求，并确保客户端能够将服务器的响应与相应的请求正确匹配起来 // id可选，如果省略则为通知
+> }
+> {  // Success Response
+>     "jsonrpc": "2.0",
+>     "result": result_data,
+>     "id": id_value
+> }
+> {  // Error Response
+>     "jsonrpc": "2.0",
+>     "error": {
+>         "code": error_code,
+>         "message": "error_message",
+>         "data": additional_data // 可选
+>     },
+>     "id": id_value // 如果请求有id则保持一致，否则为null
+> }
+> ```
+>
+>
+
+#### Lifecycle management
+
+> <https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle>
+
+MCP是有状态协议，生命周期管理主要为了协商client/server支持的功能。
+
+#### Primitives
+
+MCP原语是MCP最重要的概念，确定了client和server可以互相提供什么，这些原语确定了与AI共享的上下文类型和AI可以操作的范围
+
+MCP server定义了三种core原语：
+
+- Tools: 让AI执行某些操作的可执行函数
+- Resources: 给AI提供上下文的数据源
+- Prompts: 有助于与LLM做结构化交互的可重用模版。(e.g., system prompts, few-shot examples)
+
+每个primitive都有用于发现的`*/list`，用于获取的`*/get`方法，tool有执行`tools/call`方法。MCP client会使用`*/list`发现可用原语。
+
+MCP client可以暴露如下原语，用于丰富MCP交互：
+
+- **Sampling**: 允许server向client的AI应用（一般是LLM）发送请求。这是唯一一个MCP server可以通过client从LLM获取信息的特性。可以保持MCP模型的独立性，让MCP开发和LLM、AI SDK等独立开。Allows servers to request language model completions from the client’s AI application. This is useful when servers’ authors want access to a language model, but want to stay model independent and not include a language model SDK in their MCP server. They can use the `sampling/complete` method to request a language model completion from the client’s AI application.
+- **Elicitation**: 允许server向用户请求额外信息，包括提示性信息、确认指令等。Allows servers to request additional information from users. This is useful when servers’ authors want to get more information from the user, or ask for confirmation of an action. They can use the `elicitation/request` method to request additional information from the user.
+- **Logging**: 允许server向client发送调试、进度监控等调试信息。Enables servers to send log messages to clients for debugging and monitoring purposes.
+
+#### Notifications
+
+MCP协议支持实时notification，用于server client间的实时升级。例如server有tool增加或更改，可以向client发送notification。Notifications are sent as JSON-RPC 2.0 notification messages (without expecting a response) and enable MCP servers to provide real-time updates to connected clients.
+
+#### Data Layer Procedure Example
+
+> <https://modelcontextprotocol.io/docs/learn/architecture#data-layer-2>
+
+1. Initialization (Lifecycle Management):
+   1. Client <=> Server: `initialize` request. Client请求Server响应，交换或协商各自的ID、协议版本、支持的特性
+   2. Client => Server: 成功初始化后，client发送notification给server表示client ready
+2. Tool Discovery (Primitives)
+   1. Client => Server: Client给Server发送 `tools/list` 请求，用于发现Server有哪些tools可用
+   2. Server => Client: 返回可用tools数组
+
+tools数组每个元素的字段包括：
+
+- **`name`**: A unique identifier for the tool within the server’s namespace. This serves as the primary key for tool execution and should follow a clear naming pattern (e.g., `calculator_arithmetic` rather than just `calculate`)
+- **`title`**: A human-readable display name for the tool that clients can show to users
+- **`description`**: Detailed explanation of what the tool does and when to use it
+- **`inputSchema`**: A JSON Schema that defines the expected input parameters, enabling type validation and providing clear documentation about required and optional parameters
+
+> AI获取到 `tools/list` 请求的响应后，将不同MCP server的tools集合起来，AI就可以知道他能做什么，从而在后续的对话中用上
+
+3. Tool Execution (Primitives)
+   1. Client => Server: Client使用 `tools/call` method向Server发送tool调用请求。请求的params->name会和前面`tools/list`返回的某个tool的name严格对应
+   2. Server => Client: 返回result
+
+```json
+{  // Request
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "weather_current",
+    "arguments": {
+      "location": "San Francisco",
+      "units": "imperial"
+    }
+  }
+}
+{  // Response
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": [  // content是个 Array，支持text, images, resources, etc.
+      {
+        "type": "text",  // 表示这个content element的类型，这里表示是个纯文本text
+        "text": "Current weather in San Francisco: 68°F, partly cloudy with light winds from the west at 8 mph. Humidity: 65%"
+      }
+    ]
+  }
+}
+```
+
+4. Real-time Updates (Notifications)
+
+Key Features of MCP Notifications:
+
+1. **No Response Required**: 无需响应。Notice there’s no `id` field in the notification. This follows JSON-RPC 2.0 notification semantics where no response is expected or sent.
+2. **Capability-Based**: 基于能力。如果初始化阶段没有声明Server有notification能力就不可用。This notification is only sent by servers that declared `"listChanged": true` in their tools capability during initialization (as shown in Step 1).
+3. **Event-Driven**: 内部状态改变驱动的。The server decides when to send notifications based on internal state changes, making MCP connections dynamic and responsive.
+
+### Layer: Transport Layer
+
+传输层管理通信通道和认证。The transport layer manages communication channels and authentication between clients and servers. It handles connection establishment, message framing, and secure communication between MCP participants.MCP supports two transport mechanisms:
+
+- **Stdio transport**: 在同一台机器上使用进程通信的标准输入/输出。Uses standard input/output streams for direct process communication between local processes on the same machine, providing optimal performance with no network overhead.
+- **Streamable HTTP transport**: Uses HTTP POST for client-to-server messages with optional Server-Sent Events for streaming capabilities. This transport enables remote server communication and supports standard HTTP authentication methods including bearer tokens, API keys, and custom headers. MCP recommends using OAuth to obtain authentication tokens.
 
 ---
 
 ## Debugging
 
-> https://modelcontextprotocol.io/legacy/tools/debugging
+> <https://modelcontextprotocol.io/legacy/tools/debugging>
 
 - **MCP Inspector**: UI界面的server测试
 
@@ -84,11 +213,9 @@ An example in vscode and cline:
 
 - **Server Logging**: 自定义logging实现、性能监控
 
-
-
 ### Inspector
 
-> https://modelcontextprotocol.io/legacy/tools/inspector
+> <https://modelcontextprotocol.io/legacy/tools/inspector>
 
 用于调试MCP server的可交互式UI工具。
 
@@ -108,21 +235,13 @@ npx @modelcontextprotocol/inspector uv --directory path/to/server run package-na
 - 功能测试：上方选择各种MCP server暴露的接口的测试子介面，Resource, Prompts, Tools等。中间是测试发起的按钮，对应server暴露的接口的调用测试。或者有其他方式发起的测试的log
 - Notifications pane: Presents all logs recorded from the server. Shows notifications received from the server
 
-
-
 ---
 
 ## Base Protocol
 
-
-
 ### Lifecycle
 
-
-
 ### Transports
-
-
 
 ### Authentication
 
@@ -142,8 +261,6 @@ Authentication can be used by servers that want to expose tools accessing protec
 
 #### Progress
 
-
-
 ---
 
 ## Client
@@ -155,8 +272,6 @@ Authentication can be used by servers that want to expose tools accessing protec
 | **Sampling**    | Sampling allows servers to request LLM completions through the client, enabling an agentic workflow. This approach puts the client in complete control of user permissions and security measures. | A server for booking travel may send a list of flights to an LLM and request that the LLM pick the best flight for the user. |
 | **Roots**       | Roots allow clients to specify which files servers can access, guiding them to relevant directories while maintaining security boundaries. client给server指定哪些文件可以访问，引导server到对应目录，同时保证安全边界。 | A server for booking travel may be given access to a specific directory, from which it can read a user’s calendar. |
 | **Elicitation** | Elicitation enables servers to request specific information from users during interactions, providing a structured way for servers to gather information on demand. | A server booking travel may ask for the user’s preferences on airplane seats, room type or their contact number to finalise a booking. |
-
-
 
 #### Parsing Tool Results
 
@@ -229,23 +344,13 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-
-
-
-
-
-
 ### Roots
-
-
-
-
 
 ### Sampling
 
 > 原义为采样，功能是mcp server接收到某个参数的请求时，将这个参数包装成prompt，再向LLM提问。这里sampling的含义代表的是啥？
 >
-> https://modelcontextprotocol.io/specification/2025-06-18/client/sampling
+> <https://modelcontextprotocol.io/specification/2025-06-18/client/sampling>
 
 `tool`可以通过`sampling`(generating text)和LLM交互。Tools can interact with LLMs through sampling (generating text):
 
@@ -277,15 +382,9 @@ async def generate_poem(topic: str, ctx: Context[ServerSession, None]) -> str:
     return str(result.content)
 ```
 
-
-
-
-
-
-
 ### Elication: Interaction with Users
 
-> 启发功能 https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation
+> 启发功能 <https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation>
 
 Elicitation通过让用户输入嵌套在其它mcp server feature中来实现可交互的工作流。mcp-protocol本身不限定Elicitation出现的位置，也不要求使用任何用户交互模型
 
@@ -331,15 +430,11 @@ async def book_table(date: str, time: str, party_size: int, ctx: Context[ServerS
     return f"[SUCCESS] Booked for {date} at {time}"
 ```
 
-
-
 The `elicit()` method returns an `ElicitationResult` with:
 
 - `action`: "accept", "decline", or "cancel" 三种状态：接受、拒绝、取消
 - `data`: The validated response (only when accepted)
 - `validation_error`: Any validation error message
-
-
 
 ---
 
@@ -374,14 +469,10 @@ MCP servers declare capabilities during initialization:
 | `logging`     | -                         | Server logging configuration    |
 | `completions` | -                         | Argument completion suggestions |
 
-
-
 ### Development and Running
 
 - Python >= 3.10
-- stdio的map server不可以使用python` print`这种写入到stdio的输出。For STDIO-based server, never write to standard output (stdout). Writing to stdout will corrupt the JSON-RPC messages and break your server.
-
-
+- stdio的map server不可以使用python`print`这种写入到stdio的输出。For STDIO-based server, never write to standard output (stdout). Writing to stdout will corrupt the JSON-RPC messages and break your server.
 
 **Running MCP Server**
 
@@ -392,19 +483,11 @@ MCP servers declare capabilities during initialization:
 - Direct Execution: `python server.py` or `uv run mcp run server.py` 不支持low-level server variant，只支持`FastMCP`，cline常用
 - HTTP 远程调用常用
 
-
-
-
-
 ### Low-Level Server
 
 > Caution: The `uv run mcp run` and `uv run mcp dev` tool doesn't support low-level server.
 
-
-
-
-
-### Tools: Action/Operation
+### Tools: AI Actions
 
 - `Tools`是LLM通过MCP server操作的接口
 - 通常会进行计算、产生副作用
@@ -434,11 +517,29 @@ async def long_running_task(task_name: str, ctx: Context[ServerSession, None], s
     return f"Task '{task_name}' completed"
 ```
 
+#### Date Types
 
+##### Image: Handle Image
 
+FastMCP provides an `Image` class that automatically handles image data:
 
+```python
+"""Example showing image handling with FastMCP."""
 
-#### Structured Output Support
+from PIL import Image as PILImage
+from mcp.server.fastmcp import FastMCP, Image
+
+mcp = FastMCP("Image Example")
+
+@mcp.tool() # 这个案例在tool里面用 fastmcp.Image
+def create_thumbnail(image_path: str) -> Image:
+    """Create a thumbnail from an image"""
+    img = PILImage.open(image_path)
+    img.thumbnail((100, 100))
+    return Image(data=img.tobytes(), format="png") # 这里用mcp的Image返回
+```
+
+##### Structured Output
 
 ```python
 """
@@ -536,38 +637,6 @@ When an `outputSchema` is defined, the server automatically validates the struct
 
 
 
-#### Date Types
-
-
-
-##### Image: Handle Image
-
-FastMCP provides an `Image` class that automatically handles image data:
-
-```python
-"""Example showing image handling with FastMCP."""
-
-from PIL import Image as PILImage
-from mcp.server.fastmcp import FastMCP, Image
-
-mcp = FastMCP("Image Example")
-
-@mcp.tool() # 这个案例在tool里面用 fastmcp.Image
-def create_thumbnail(image_path: str) -> Image:
-    """Create a thumbnail from an image"""
-    img = PILImage.open(image_path)
-    img.thumbnail((100, 100))
-    return Image(data=img.tobytes(), format="png") # 这里用mcp的Image返回
-```
-
-
-
-
-
-##### Structured Output
-
-
-
 有返回类型注解时`Tools`默认返回结构化数据，否则返回非结构化数据
 
 Structured output supports these return types:
@@ -581,22 +650,24 @@ Structured output supports these return types:
 
 Classes without type hints cannot be serialized for structured output. Only classes with properly annotated attributes will be converted to `Pydantic` models for schema generation and validation. 没有类型注释的类无法被序列化为结构化输出。只有正确注释属性的类才会被转换为Pydantic模型进行schema生成和验证。
 
-Structured results are automatically validated against the output schema generated from the annotation. 结构化结果会用注解生成的输出模式做自动验证。 This ensures the tool returns well-typed, validated data that clients can easily process. 
+Structured results are automatically validated against the output schema generated from the annotation. 结构化结果会用注解生成的输出模式做自动验证。 This ensures the tool returns well-typed, validated data that clients can easily process.
 
 > In cases where a tool function's return type annotation causes the tool to be classified as structured *and this is undesirable*, the classification can be suppressed by passing `structured_output=False` to the `@tool` decorator. 如果`tool`函数的返回类型注解导致`tool`被分类为结构化的 是非预期的，可以传递`structured_output=False`给`@tool`装饰器来抑制分类
 
-- https://github.com/modelcontextprotocol/python-sdk/blob/main/examples/snippets/servers/structured_output.py
+- <https://github.com/modelcontextprotocol/python-sdk/blob/main/examples/snippets/servers/structured_output.py>
 
+### Resources: Context Data
 
-
-### Resources: Data
-
+> Server三大primitive中提供数据、上下文信息的
+>
 > they provide data but shouldn't perform significant computation or have side effects
 
 - `Resources`向LLM暴露数据。类似REST API的GET
 - 不应有大量计算或有副作用。
 
-### Prompts
+### Prompts: Interaction Templates
+
+> Server三大primitive中提供与LLM交互模版的
 
 Prompts are reusable templates that help LLMs interact with your server effectively. `Prompts`是帮助LLM与你的服务器高效交互的可重用模版。
 
@@ -623,15 +694,13 @@ def debug_error(error: str) -> list[base.Message]:
 
 ### Utilities
 
-
-
 #### Completion: Suggestions
 
 MCP supports providing completion suggestions for prompt arguments and resource template parameters. 为prompt参数/资源模版参数 提供补全建议。With the context parameter, servers can provide completions based on previously resolved values:
 
-Server side: https://github.com/modelcontextprotocol/python-sdk/blob/main/examples/snippets/servers/completion.py
+Server side: <https://github.com/modelcontextprotocol/python-sdk/blob/main/examples/snippets/servers/completion.py>
 
-Client usage: https://github.com/modelcontextprotocol/python-sdk/blob/main/examples/snippets/clients/completion_client.py
+Client usage: <https://github.com/modelcontextprotocol/python-sdk/blob/main/examples/snippets/clients/completion_client.py>
 
 ```python
 """
@@ -714,10 +783,6 @@ if __name__ == "__main__":
     main()
 ```
 
-
-
-
-
 #### Logging
 
 ```python
@@ -728,8 +793,6 @@ print("Processing request")
 import logging
 logging.info("Processing request")
 ```
-
-
 
 使用`Context`做logging和notify。logging是与LLM无关的？notify应该也和LLM无关？
 
@@ -757,10 +820,6 @@ async def process_data(data: str, ctx: Context[ServerSession, None]) -> str:
     return f"Processed: {data}"
 ```
 
-
-
-
-
 ## Context
 
 - `tool`, `resource`中用`Context`只需传递一个`Context`注解的参数（参数名字无要求）
@@ -775,8 +834,6 @@ async def my_tool(x: int, ctx: Context) -> str:
     # The context parameter can have any name as long as it's type-annotated
     return await process_with_context(x, ctx)
 ```
-
-
 
 ### Context Properties and Methods
 
@@ -794,12 +851,6 @@ async def my_tool(x: int, ctx: Context) -> str:
 - `await ctx.read_resource(uri)` - Read a resource by URI
 - `await ctx.elicit(message, schema)` - Request additional information from user with validation
 
-
-
-
-
-
-
 ### FastMCP Properties: ctx.fastmcp
 
 可以通过`ctx.fastmcp`读写`FastMCP` server 实例的属性/元数据。The FastMCP server instance accessible via `ctx.fastmcp` provides access to server configuration and metadata:
@@ -814,8 +865,6 @@ async def my_tool(x: int, ctx: Context) -> str:
   - `stateless_http` - Whether the server operates in stateless mode
   - And other configuration options
 
-
-
 ### Session Properties and Methods: ctx.session
 
  `ctx.session` 提供client通信的高级控制。The session object accessible via `ctx.session` provides advanced control over client communication:
@@ -828,8 +877,6 @@ async def my_tool(x: int, ctx: Context) -> str:
 - `await ctx.session.send_resource_list_changed()` - Notify clients that the resource list changed
 - `await ctx.session.send_tool_list_changed()` - Notify clients that the tool list changed
 - `await ctx.session.send_prompt_list_changed()` - Notify clients that the prompt list changed
-
-
 
 ### Request Context Properties: ctx.request_context
 
@@ -858,15 +905,6 @@ uv run mcp dev server.py --with pandas --with numpy
 uv run mcp dev server.py --with-editable .
 ```
 
-
-
-
-
-
-
-
-
 ## An All-in-One demo
 
 ### Stdio MCP Server
-
