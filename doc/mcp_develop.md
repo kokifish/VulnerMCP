@@ -15,6 +15,19 @@ uv run mcp dev main.py # Run a MCP server with the MCP Inspector
 uv run mcp --help # show cmd help
 ```
 
+| Feature     | Explanation                                                  | Data Flow          | Request        | Response       |
+| ----------- | ------------------------------------------------------------ | ------------------ | -------------- | -------------- |
+| Tools       | Host让Server做些操作                                         | Server->H          | H->C->S        | S->C->H        |
+| Resources   | Host向Server拿数据                                           | Server->H          | H->C->S        | S->C->H        |
+| Prompts     |                                                              |                    |                |                |
+| Roots       | 。唯一MCP读写Local Files的                                   | LocalFiles->Server |                |                |
+| Sampling    | Server通过Client使用LLM。唯一MCP利用LLM的                    | LLM->Server        | S->C->[U]->LLM | LLM->C->[U]->S |
+| Elicitation | Server向User请求补充信息/确认。唯一Server一定要从User拿信息的 | User->Server       | S->C->U        | U->C->S        |
+
+> H: Host; C: Client; S: Server; U: User; 
+
+
+
 ## Environment Preparation
 
 An example in vscode and cline:
@@ -140,7 +153,7 @@ MCP协议支持实时notification，用于server client间的实时升级。例�
 > <https://modelcontextprotocol.io/docs/learn/architecture#data-layer-2>
 
 1. Initialization (Lifecycle Management):
-   1. Client <=> Server: `initialize` request. Client请求Server响应，交换或协商各自的ID、协议版本、支持的特性
+   1. Client <=> Server: `initialize` request. Client请求Server响应，交换或协商各自的ID、协议版本、支持的特性。Client/Server可能同时支持多个版本，但协商后只能使用其中一个版本。
    2. Client => Server: 成功初始化后，client发送notification给server表示client ready
 2. Tool Discovery (Primitives)
    1. Client => Server: Client给Server发送 `tools/list` 请求，用于发现Server有哪些tools可用
@@ -266,12 +279,14 @@ Authentication can be used by servers that want to expose tools accessing protec
 ## Client
 
 > MCP client是和MCP server交互的协议级组件。The host is the application users interact with, while clients are the protocol-level components that enable server connections.
+>
+> 这了把不同Feature分为Client和Server侧主要参考的MCP Specification，它分类的依据应该是以Feature实现该特性的主要SDK代码在哪一侧来确定的，而不是取决于Feature使用的地方在哪，如果按Feature在哪使用的话，这些Feature都应该分类为Server侧的。
 
 | Feature         | Explanation                                                  | Example                                                      |
 | --------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | **Sampling**    | Sampling allows servers to request LLM completions through the client, enabling an agentic workflow. This approach puts the client in complete control of user permissions and security measures. | A server for booking travel may send a list of flights to an LLM and request that the LLM pick the best flight for the user. |
-| **Roots**       | Roots allow clients to specify which files servers can access, guiding them to relevant directories while maintaining security boundaries. client给server指定哪些文件可以访问，引导server到对应目录，同时保证安全边界。 | A server for booking travel may be given access to a specific directory, from which it can read a user’s calendar. |
-| **Elicitation** | Elicitation enables servers to request specific information from users during interactions, providing a structured way for servers to gather information on demand. | A server booking travel may ask for the user’s preferences on airplane seats, room type or their contact number to finalise a booking. |
+| **Roots**       | client给server指定哪些文件可以访问，引导server到对应目录，同时保证安全边界。 Roots allow clients to specify which files servers can access, guiding them to relevant directories while maintaining security boundaries. | A server for booking travel may be given access to a specific directory, from which it can read a user’s calendar. |
+| **Elicitation** | 按需允许server向user请求信息/确认。Elicitation enables servers to request specific information from users during interactions, providing a structured way for servers to gather information on demand. | A server booking travel may ask for the user’s preferences on airplane seats, room type or their contact number to finalise a booking. |
 
 #### Parsing Tool Results
 
@@ -344,13 +359,59 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### Roots
+### Roots: Access to Local Files
 
-### Sampling
+> MCP协议中唯一与本地文件交互的功能
 
-> 原义为采样，功能是mcp server接收到某个参数的请求时，将这个参数包装成prompt，再向LLM提问。这里sampling的含义代表的是啥？
+- 确定server可以访问哪些文件，允许client指定server可以哪些文件夹需要关注
+- 不是授权server可以不受限制地访问给定的文件夹，而是引导server访问这些文件夹，并保证安全边界
+- Roots始终使用`file://URL`的URI schema
+- roots可以动态更新，client向server发送 `roots/list_changed` 的notification表示访问边界更新了
+
+> Security Alert: roots特性只是告诉server可以在什么路径下操作，而文件访问的权限控制始终在client侧，本地文件的安全取决于client侧的安全策略。
+
+
+
+### Sampling: Leveraging AI
+
+> MCP协议中唯一 Server->Client->LLM 获取信息的功能
+>
+> 原义为采样，功能是MCP Server接收到某个参数的请求时，借由Client向LLM提问。这里sampling的含义代表的是啥？
 >
 > <https://modelcontextprotocol.io/specification/2025-06-18/client/sampling>
+
+- MCP Server发起，经由有AI模型访问能力的MCP Client，向LLM提问，能够实现依赖AI的任务，而无需依赖具体的LLM或AI SDK。由于Sampling可以嵌入在其他操作中间，而且是一个分开的、独立的LLM call，所以Sampling既可以利用到其他操作获取的context，又可以利用context window增强LLM call的有效性。这里应该是想说Sampling是新开一个LLM对话过程，而context是Server决定的，可以决定用哪些已有的context，所以这种提问更有针对性，适合处理相对独立的需要LLM参与的子任务。！！！这里需要源码层和debug层确认一下。
+- While not a requirement, sampling is designed to allow human-in-the-loop control. Users can maintain oversight through several mechanisms:
+  - **Approval controls**: Sampling可能需要用户的显式同意。Client可以展示server想要分析什么以及原因。用户可以选择同意、拒绝、修改请求。Sampling requests may require explicit user consent. Clients can show what the server wants to analyze and why. Users can approve, deny, or modify requests.
+  - **Transparency features**: Clients can display the exact prompt, model selection, and token limits, allowing users to review AI responses before they return to the server.
+  - **Configuration options**: User可以设置LLM参数、自动同意的操作等。Client可以提供敏感信息编辑操作。Users can set model preferences, configure auto-approval for trusted operations, or require approval for everything. Clients may provide options to redact sensitive information.
+  - **Security considerations**: Both clients and servers must handle sensitive data appropriately during sampling. Clients should implement rate limiting and validate all message content. The human-in-the-loop design ensures that server-initiated AI interactions cannot compromise security or access sensitive data without explicit user consent.
+
+```mermaid
+sequenceDiagram
+    participant LLM
+    participant User
+    participant Client
+    participant Server
+
+    Note over Server,Client: Server initiates sampling
+    Server->>Client: sampling/createMessage
+
+    Note over Client,User: Human-in-the-loop review
+    Client->>User: Present request for approval
+    User-->>Client: Review and approve/modify
+
+    Note over Client,LLM: Model interaction
+    Client->>LLM: Forward approved request
+    LLM-->>Client: Return generation
+
+    Note over Client,User: Response review
+    Client->>User: Present response for approval
+    User-->>Client: Review and approve/modify
+
+    Note over Server,Client: Complete request
+    Client-->>Server: Return approved response
+```
 
 `tool`可以通过`sampling`(generating text)和LLM交互。Tools can interact with LLMs through sampling (generating text):
 
@@ -382,13 +443,67 @@ async def generate_poem(topic: str, ctx: Context[ServerSession, None]) -> str:
     return str(result.content)
 ```
 
-### Elication: Interaction with Users
+```json
+{  // Request parameters example:
+  messages: [
+    {
+      role: "user",
+      content: "Analyze these flight options and recommend the best choice:\n" +
+               "[47 flights with prices, times, airlines, and layovers]\n" +
+               "User preferences: morning departure, max 1 layover"  // 发给LLM的信息
+    }
+  ],
+  modelPreferences: {  // 一些模型相关的参数
+    hints: [{
+      name: "claude-3-5-sonnet"  // Suggested model
+    }],
+    costPriority: 0.3,      // Less concerned about API cost
+    speedPriority: 0.2,     // Can wait for thorough analysis
+    intelligencePriority: 0.9  // Need complex trade-off evaluation
+  },
+  systemPrompt: "You are a travel expert helping users find the best flights based on their preferences",  // LLM prompt
+  maxTokens: 1500
+}
+```
 
-> 启发功能 <https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation>
 
-Elicitation通过让用户输入嵌套在其它mcp server feature中来实现可交互的工作流。mcp-protocol本身不限定Elicitation出现的位置，也不要求使用任何用户交互模型
 
-Request additional information from users. 向用户请求更多info/action. This example shows an Elicitation during a Tool Call:
+### Elicitation: Interaction with Users
+
+> 唯一server->client->user请求信息的功能。引发/引出 <https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation>
+>
+> elicit:[verb] evoke or draw out (a response, answer, or fact) from someone in reaction to one's own actions or questions.
+>
+> elicitation:[noun] the process of getting or producing something, especially information or a reaction
+
+Request additional information from users. 向用户请求更多info/action. 
+
+Elicitation通过让用户输入嵌套在其它mcp server feature中来实现可交互的工作流。mcp-protocol本身不限定Elicitation出现的位置，也不要求使用任何用户交互模型。这让server可以向user请求一些特定的输入，以避免整个流程直接终止或需要在流程早期就收集所有信息。
+
+
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Client
+    participant Server
+
+    Note over Server,Client: Server initiates elicitation
+    Server->>Client: elicitation/create
+
+    Note over Client,User: Human interaction
+    Client->>User: Present elicitation UI
+    User-->>Client: Provide requested information
+
+    Note over Server,Client: Complete request
+    Client-->>Server: Return user response
+
+    Note over Server: Continue processing with new information
+```
+
+
+
+This example shows an Elicitation during a Tool Call:
 
 ```python
 from pydantic import BaseModel, Field
@@ -665,11 +780,34 @@ Structured results are automatically validated against the output schema generat
 - `Resources`向LLM暴露数据。类似REST API的GET
 - 不应有大量计算或有副作用。
 
+分为两种resources：
+
+- **Direct Resources**: fixed URIs that point to specific data. `calendar://events/2024`
+- **Resource Templates**: dynamic URIs with parameters for flexible queries.`travel://activities/{city}/{category}`URL里带参数的
+
+**Protocol operations:**
+
+| Method                     | Purpose                         | Returns                                |
+| -------------------------- | ------------------------------- | -------------------------------------- |
+| `resources/list`           | List available direct resources | Array of resource descriptors          |
+| `resources/templates/list` | Discover resource templates     | Array of resource template definitions |
+| `resources/read`           | Retrieve resource contents      | Resource data with metadata            |
+| `resources/subscribe`      | Monitor resource changes        | Subscription confirmation              |
+
+> 因此Inspector里面resource会有两个list，一个是list直接资源，一个list模版资源
+
 ### Prompts: Interaction Templates
 
 > Server三大primitive中提供与LLM交互模版的
 
-Prompts are reusable templates that help LLMs interact with your server effectively. `Prompts`是帮助LLM与你的服务器高效交互的可重用模版。
+Prompts are reusable templates that help LLMs interact with your server effectively. `Prompts`是帮助LLM与MCP服务器高效交互的可重用模版。
+
+prompts是用户控制的，需要显示调用，和resource一样支持参数补全。
+
+| Method         | Purpose                                    | Returns                               |
+| -------------- | ------------------------------------------ | ------------------------------------- |
+| `prompts/list` | Discover available prompts 发现可用prompts | Array of prompt descriptors           |
+| `prompts/get`  | Retrieve prompt details 获取prompt         | Full prompt definition with arguments |
 
 ```python
 from mcp.server.fastmcp import FastMCP
@@ -677,11 +815,9 @@ from mcp.server.fastmcp.prompts import base
 
 mcp = FastMCP(name="Prompt Example")
 
-
 @mcp.prompt(title="Code Review")
 def review_code(code: str) -> str:
     return f"Please review this code:\n\n{code}"
-
 
 @mcp.prompt(title="Debug Assistant")
 def debug_error(error: str) -> list[base.Message]:
@@ -707,7 +843,6 @@ Client usage: <https://github.com/modelcontextprotocol/python-sdk/blob/main/exam
 cd to the `examples/snippets` directory and run:
     uv run completion-client
 """
-
 import asyncio
 import os
 
