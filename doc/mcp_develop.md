@@ -5,9 +5,9 @@
 > [Quick Start Video on X](https://x.com/sdrzn/status/1867271665086074969) use cline on UI and config for mcp servers
 
 1. 用户向LLM提问
-2. LLM分析问题，分析已有MCP server和MCP tools，决定调用MCP tool。（不调用的就和MCP无关了）
+2. LLM分析问题，分析已有MCP Server及这些Server有的tools，决定调用MCP tool。（不调用的就和MCP无关了）
 3. MCP client调用MCP server tool
-4. MCP server tool返回结果，这里的结果是先返回给MCP client还是MCP server？
+4. MCP server tool返回结果，这里的结果先返回给MCP client还是MCP server？
 
 ```bash
 uv run mcp install main.py # install for Claude Desktop
@@ -15,18 +15,42 @@ uv run mcp dev main.py # Run a MCP server with the MCP Inspector
 uv run mcp --help # show cmd help
 ```
 
+- vscode的Cline这种既是MCP Host也是MCP Client，和Server连接时，Cline会自己新建一个General MCP Client来连接server。
+
+```mermaid
+graph TB
+    subgraph "MCP Host (AI Application)"
+        Client1["MCP Client 1"]
+        Client2["MCP Client 2"]
+        Client3["MCP Client 3"]
+    end
+
+    Server1["MCP Server 1<br/>(e.g., Sentry)"]
+    Server2["MCP Server 2<br/>(e.g., Filesystem)"]
+    Server3["MCP Server 3<br/>(e.g., Database)"]
+
+    Client1 ---|"One-to-one<br/>connection"| Server1
+    Client2 ---|"One-to-one<br/>connection"| Server2
+    Client3 ---|"One-to-one<br/>connection"| Server3
+
+    style Client1 fill:#e1f5fe
+    style Client2 fill:#e1f5fe
+    style Client3 fill:#e1f5fe
+    style Server1 fill:#f3e5f5
+    style Server2 fill:#f3e5f5
+    style Server3 fill:#f3e5f5
+```
+
 | Feature     | Explanation                                                  | Data Flow          | Request        | Response       |
 | ----------- | ------------------------------------------------------------ | ------------------ | -------------- | -------------- |
 | Tools       | Host让Server做些操作                                         | Server->H          | H->C->S        | S->C->H        |
 | Resources   | Host向Server拿数据                                           | Server->H          | H->C->S        | S->C->H        |
 | Prompts     |                                                              |                    |                |                |
-| Roots       | 。唯一MCP读写Local Files的                                   | LocalFiles->Server |                |                |
+| Roots       | Client告诉Server可以读写哪些路径。唯一MCP读写Local Files的   | LocalFiles->Server | H->C->S        | -              |
 | Sampling    | Server通过Client使用LLM。唯一MCP利用LLM的                    | LLM->Server        | S->C->[U]->LLM | LLM->C->[U]->S |
 | Elicitation | Server向User请求补充信息/确认。唯一Server一定要从User拿信息的 | User->Server       | S->C->U        | U->C->S        |
 
-> H: Host; C: Client; S: Server; U: User; 
-
-
+> H: Host; C: Client; S: Server; U: User;
 
 ## Environment Preparation
 
@@ -242,6 +266,10 @@ npx @modelcontextprotocol/inspector uvx mcp-server-git --repository ~/code/mcp/s
 
 npx @modelcontextprotocol/inspector node path/to/server/index.js args... # Local TypeScript mcp server
 npx @modelcontextprotocol/inspector uv --directory path/to/server run package-name args...  # Local python mcp server
+
+uv run mcp dev server.py
+uv run mcp dev server.py --with pandas --with numpy # Add dependencies
+uv run mcp dev server.py --with-editable . # Mount local code
 ```
 
 - Server connection pane: 左侧，展示/设定传输类型、启动命令、环境变量
@@ -280,7 +308,11 @@ Authentication can be used by servers that want to expose tools accessing protec
 
 > MCP client是和MCP server交互的协议级组件。The host is the application users interact with, while clients are the protocol-level components that enable server connections.
 >
-> 这了把不同Feature分为Client和Server侧主要参考的MCP Specification，它分类的依据应该是以Feature实现该特性的主要SDK代码在哪一侧来确定的，而不是取决于Feature使用的地方在哪，如果按Feature在哪使用的话，这些Feature都应该分类为Server侧的。
+> 这里把不同Feature分为Client和Server侧主要参考的MCP Specification，它分类的依据应该是以Feature实现该特性的主要SDK代码在哪一侧来确定的，而不是取决于Feature使用的地方在哪，如果按Feature在哪使用的话，这些Feature都应该分类为Server侧的。
+>
+> 如果没有特殊需求，MCP Client是可以不用开发的，因为MCP Host会包含一个通用的MCP Client，每连接一个Server就起一个通用Client来连接。
+>
+> 如果需要定制Client，参考：<https://modelcontextprotocol.io/docs/develop/build-client>
 
 | Feature         | Explanation                                                  | Example                                                      |
 | --------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
@@ -361,7 +393,7 @@ if __name__ == "__main__":
 
 ### Roots: Access to Local Files
 
-> MCP协议中唯一与本地文件交互的功能
+> MCP协议中唯一与本地文件交互的功能，用于确定本地文件的访问边界。实际上这只是一种推荐，而非强制，server要瞎读写也是可以的，只要server进程有对应权限
 
 - 确定server可以访问哪些文件，允许client指定server可以哪些文件夹需要关注
 - 不是授权server可以不受限制地访问给定的文件夹，而是引导server访问这些文件夹，并保证安全边界
@@ -369,8 +401,6 @@ if __name__ == "__main__":
 - roots可以动态更新，client向server发送 `roots/list_changed` 的notification表示访问边界更新了
 
 > Security Alert: roots特性只是告诉server可以在什么路径下操作，而文件访问的权限控制始终在client侧，本地文件的安全取决于client侧的安全策略。
-
-
 
 ### Sampling: Leveraging AI
 
@@ -466,8 +496,6 @@ async def generate_poem(topic: str, ctx: Context[ServerSession, None]) -> str:
 }
 ```
 
-
-
 ### Elicitation: Interaction with Users
 
 > 唯一server->client->user请求信息的功能。引发/引出 <https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation>
@@ -476,11 +504,9 @@ async def generate_poem(topic: str, ctx: Context[ServerSession, None]) -> str:
 >
 > elicitation:[noun] the process of getting or producing something, especially information or a reaction
 
-Request additional information from users. 向用户请求更多info/action. 
+Request additional information from users. 向用户请求更多info/action.
 
 Elicitation通过让用户输入嵌套在其它mcp server feature中来实现可交互的工作流。mcp-protocol本身不限定Elicitation出现的位置，也不要求使用任何用户交互模型。这让server可以向user请求一些特定的输入，以避免整个流程直接终止或需要在流程早期就收集所有信息。
-
-
 
 ```mermaid
 sequenceDiagram
@@ -500,8 +526,6 @@ sequenceDiagram
 
     Note over Server: Continue processing with new information
 ```
-
-
 
 This example shows an Elicitation during a Tool Call:
 
@@ -749,8 +773,6 @@ Tools can return data in three ways:
 3. **Both**: Return a tuple of (content, structured_data) preferred option to use for backwards compatibility
 
 When an `outputSchema` is defined, the server automatically validates the structured output against the schema. This ensures type safety and helps catch errors early. 如果定义了`outputSchema`，server会用schema自动验证结构化输出，以确保类型安全。
-
-
 
 有返回类型注解时`Tools`默认返回结构化数据，否则返回非结构化数据
 
@@ -1026,20 +1048,15 @@ The request context accessible via `ctx.request_context` contains request-specif
 - `ctx.request_context.request` - The original MCP request object for advanced processing
 - `ctx.request_context.request_id` - Unique identifier for this request
 
-### Develop Mode: Inspector
+---
 
-The fastest way to test and debug your server is with the MCP Inspector:
+# All-in-One MCP demo
 
-```bash
-uv run mcp dev server.py
+## Stdio MCP Server
 
-# Add dependencies
-uv run mcp dev server.py --with pandas --with numpy
+# Cline
 
-# Mount local code
-uv run mcp dev server.py --with-editable .
-```
+路径默认是Cline/src下的
 
-## An All-in-One demo
-
-### Stdio MCP Server
+- core/controller/index.ts: initTask: 新建对话的入口函数，在新建任务/下载mcp/修复/提升/解释代码的时候都会用到`initTask`
+  - core/workspace/setup.ts: setupWorkspaceManager:
