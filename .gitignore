@@ -4,8 +4,12 @@
 *.apk
 *.pa
 *.dis
+*.pandasm
 *.abc
 *.log
+*.whl
+ark_disasm
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

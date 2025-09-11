@@ -1,0 +1,69 @@
+import os
+import subprocess
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+
+import ohre
+from ohre.abcre.dis.DisFile import DisFile
+from ohre.abcre.dis.AsmMethod import AsmMethod
+from ohre.abcre.dis.PandaReverser import PandaReverser
+from ohre.core import oh_app, oh_hap
+
+ARK_DISASM = "tools/ark_disasm"
+TMP_HAP_EXTRACT = "tmp_hap_extract"
+
+
+panda_re_global: PandaReverser | None = None
+module_methd_name_l: List[str] | None = None
+
+
+def disasm(in_path: str = "main.dis"):
+    if (in_path.endswith(".dis")):
+        dis_file: DisFile = DisFile(in_path)
+    elif (in_path.endswith(".hap")):
+        hhap = oh_hap.oh_hap(in_path)
+        hhap.extract_all_to(TMP_HAP_EXTRACT)
+        abc_file = os.path.join(TMP_HAP_EXTRACT, "ets", "modules.abc")
+        dis_file_name = f"{os.path.splitext(os.path.basename(in_path))[0]}.abc.dis"  # os.path.splitext(file_name)[0]
+        result = subprocess.run([ARK_DISASM, abc_file, dis_file_name], capture_output=True, text=True)
+        dis_file: DisFile = DisFile(dis_file_name)
+    ohre.set_log_print(False)
+    panda_re: PandaReverser = PandaReverser(dis_file)
+    panda_re.trans_lift_all_method(DEBUG_LV=0)
+    panda_re.module_analysis_algorithms()
+    global panda_re_global
+    panda_re_global = panda_re
+
+
+def get_all_module_method() -> List[str]:
+    global panda_re_global, module_methd_name_l
+    panda_re = panda_re_global
+    if panda_re is None:
+        raise ValueError("panda_re_global is None, please run disasm first")
+    if module_methd_name_l is None:
+        ret = list()
+        for module_name in sorted(panda_re.dis_file.methods.keys()):
+            for methd_name in sorted(panda_re.dis_file.methods[module_name].keys()):
+                ret.append(f"{module_name}/{methd_name}")
+        module_methd_name_l = ret
+        return ret
+    else:
+        return module_methd_name_l
+
+
+def get_module_method_panda_assembly_code(module_name: str, method_name: str) -> str:
+    global panda_re_global
+    panda_re = panda_re_global
+    if panda_re is None:
+        raise ValueError("panda_re_global is None, please run disasm first")
+    if module_name not in panda_re.dis_file.methods:
+        raise ValueError(f"module_name {module_name} not found")
+    if method_name not in panda_re.dis_file.methods[module_name]:
+        raise ValueError(f"method_name {method_name} not found in module {module_name}")
+    method: AsmMethod = panda_re.dis_file.methods[module_name][method_name]
+    return method.lifted_code
+
+
+if __name__ == "__main__":
+    disasm()
+    ret = get_all_module_method()
+    print(f"get_all_module_method: {len(ret)} {ret}")

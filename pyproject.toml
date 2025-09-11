@@ -1,6 +1,6 @@
 [project]
 name = "vulnermcp"
-version = "0.1.0"
+version = "0.0.2"
 description = "MCP servers aim to vulnerability research and exploit development."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,4 +12,5 @@ dependencies = [
     "yara-python>=4.5.4",
     "llvmlite>=0.44.0",
     "httpx>=0.28.1",
+    "ohre @ file:///Users/koki/git_space/MCP/VulnerMCP/tools/ohre-0.1.dev65+g29a928922.d20250911-py3-none-any.whl"
 ]

@@ -267,9 +267,9 @@ npx @modelcontextprotocol/inspector uvx mcp-server-git --repository ~/code/mcp/s
 npx @modelcontextprotocol/inspector node path/to/server/index.js args... # Local TypeScript mcp server
 npx @modelcontextprotocol/inspector uv --directory path/to/server run package-name args...  # Local python mcp server
 
-uv run mcp dev server.py
+uv run mcp dev path/to/server.py  # 需要在.venv的同级目录下，否则会出现环境问题
 uv run mcp dev server.py --with pandas --with numpy # Add dependencies
-uv run mcp dev server.py --with-editable . # Mount local code
+uv run mcp dev path/to/server.py --with-editable . # Mount local code # FastMCP only
 ```
 
 - Server connection pane: 左侧，展示/设定传输类型、启动命令、环境变量
@@ -992,7 +992,7 @@ async def my_tool(x: int, ctx: Context) -> str:
     return await process_with_context(x, ctx)
 ```
 
-### Context Properties and Methods
+**Context Properties and Methods**
 
 - `ctx.request_id` - Unique ID for the current request
 - `ctx.client_id` - Client ID if available
@@ -1008,7 +1008,7 @@ async def my_tool(x: int, ctx: Context) -> str:
 - `await ctx.read_resource(uri)` - Read a resource by URI
 - `await ctx.elicit(message, schema)` - Request additional information from user with validation
 
-### FastMCP Properties: ctx.fastmcp
+**FastMCP Properties: ctx.fastmcp**
 
 可以通过`ctx.fastmcp`读写`FastMCP` server 实例的属性/元数据。The FastMCP server instance accessible via `ctx.fastmcp` provides access to server configuration and metadata:
 
@@ -1022,7 +1022,7 @@ async def my_tool(x: int, ctx: Context) -> str:
   - `stateless_http` - Whether the server operates in stateless mode
   - And other configuration options
 
-### Session Properties and Methods: ctx.session
+**Session Properties and Methods: ctx.session**
 
  `ctx.session` 提供client通信的高级控制。The session object accessible via `ctx.session` provides advanced control over client communication:
 
@@ -1035,7 +1035,7 @@ async def my_tool(x: int, ctx: Context) -> str:
 - `await ctx.session.send_tool_list_changed()` - Notify clients that the tool list changed
 - `await ctx.session.send_prompt_list_changed()` - Notify clients that the prompt list changed
 
-### Request Context Properties: ctx.request_context
+**Request Context Properties: ctx.request_context**
 
 The request context accessible via `ctx.request_context` contains request-specific information and resources:
 
