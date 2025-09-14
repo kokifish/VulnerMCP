@@ -1,22 +1,25 @@
 import os
 import subprocess
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from urllib.parse import quote, unquote
 
 import ohre
-from ohre.abcre.dis.DisFile import DisFile
+import ohre.misc.utils as oh_utils
 from ohre.abcre.dis.AsmMethod import AsmMethod
+from ohre.abcre.dis.DisFile import DisFile
 from ohre.abcre.dis.PandaReverser import PandaReverser
 from ohre.core import oh_app, oh_hap
 
+ohre.set_log_print(False)
 ARK_DISASM = "tools/ark_disasm"
 TMP_HAP_EXTRACT = "tmp_hap_extract"
 
-
+VULMCP_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 panda_re_global: PandaReverser | None = None
 module_methd_name_l: List[str] | None = None
 
 
-def disasm(in_path: str = "main.dis"):
+def disasm(in_path: str = os.path.join(VULMCP_ROOT_PATH, "main.dis")):
     if (in_path.endswith(".dis")):
         dis_file: DisFile = DisFile(in_path)
     elif (in_path.endswith(".hap")):
@@ -36,6 +39,8 @@ def disasm(in_path: str = "main.dis"):
 
 def get_all_module_method() -> List[str]:
     global panda_re_global, module_methd_name_l
+    if panda_re_global is None:
+        disasm()
     panda_re = panda_re_global
     if panda_re is None:
         raise ValueError("panda_re_global is None, please run disasm first")
@@ -43,27 +48,28 @@ def get_all_module_method() -> List[str]:
         ret = list()
         for module_name in sorted(panda_re.dis_file.methods.keys()):
             for methd_name in sorted(panda_re.dis_file.methods[module_name].keys()):
-                ret.append(f"{module_name}/{methd_name}")
+                ret.append(f"{module_name}.{methd_name}")
         module_methd_name_l = ret
         return ret
     else:
         return module_methd_name_l
 
 
-def get_module_method_panda_assembly_code(module_name: str, method_name: str) -> str:
+def get_module_method_panda_assembly_code(module_method_name: str) -> str:
     global panda_re_global
     panda_re = panda_re_global
     if panda_re is None:
         raise ValueError("panda_re_global is None, please run disasm first")
-    if module_name not in panda_re.dis_file.methods:
-        raise ValueError(f"module_name {module_name} not found")
-    if method_name not in panda_re.dis_file.methods[module_name]:
-        raise ValueError(f"method_name {method_name} not found in module {module_name}")
+    module_name, method_name = oh_utils.split_to_module_method_name(module_method_name)
+    if module_name not in panda_re.dis_file.methods or method_name not in panda_re.dis_file.methods[module_name]:
+        return ""
     method: AsmMethod = panda_re.dis_file.methods[module_name][method_name]
-    return method.lifted_code
+    return method.str_for_LLM()
 
 
 if __name__ == "__main__":
     disasm()
     ret = get_all_module_method()
     print(f"get_all_module_method: {len(ret)} {ret}")
+
+    print(quote("&vulwebview.src.main.ets.pages.Index&.#~@0>#aboutToAppear"))

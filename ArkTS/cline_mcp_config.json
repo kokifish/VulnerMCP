@@ -1,0 +1,19 @@
+{
+    "mcpServers": {
+        "ArkTS_Assembly_Analysis": {
+            "autoApprove": [
+                "get_panda_assembly_resource"
+            ],
+            "disabled": false,
+            "timeout": 60,
+            "type": "stdio",
+            "command": "uv",
+            "args": [
+                "--directory",
+                "/Path/to/VulnerMCP/ArkTS",
+                "run",
+                "mcp_server.py"
+            ]
+        }
+    }
+}

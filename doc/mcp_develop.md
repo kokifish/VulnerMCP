@@ -267,8 +267,8 @@ npx @modelcontextprotocol/inspector uvx mcp-server-git --repository ~/code/mcp/s
 npx @modelcontextprotocol/inspector node path/to/server/index.js args... # Local TypeScript mcp server
 npx @modelcontextprotocol/inspector uv --directory path/to/server run package-name args...  # Local python mcp server
 
-uv run mcp dev path/to/server.py  # 需要在.venv的同级目录下，否则会出现环境问题
-uv run mcp dev server.py --with pandas --with numpy # Add dependencies
+uv run mcp dev path/to/server.py  # 需要在.venv的同级目录下，否则会出现环境问题 # FastMCP only
+uv run mcp dev server.py --with pandas --with numpy # Add dependencies # FastMCP only
 uv run mcp dev path/to/server.py --with-editable . # Mount local code # FastMCP only
 ```
 
