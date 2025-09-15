@@ -9,17 +9,42 @@ from ohre.abcre.dis.AsmMethod import AsmMethod
 from ohre.abcre.dis.DisFile import DisFile
 from ohre.abcre.dis.PandaReverser import PandaReverser
 from ohre.core import oh_app, oh_hap
+import pickle
 
 ohre.set_log_print(False)
 ARK_DISASM = "tools/ark_disasm"
 TMP_HAP_EXTRACT = "tmp_hap_extract"
 
 VULMCP_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOCAL_DEFAULT_PANDARE_PKL = os.path.join(VULMCP_ROOT_PATH, "main.pkl")
 panda_re_global: PandaReverser | None = None
 module_methd_name_l: List[str] | None = None
 
 
-def disasm(in_path: str = os.path.join(VULMCP_ROOT_PATH, "main.dis")):
+def pickle_save_object(obj, filename: str):
+    with open(filename, "wb") as file:
+        pickle.dump(obj, file)
+
+
+def pickle_load_object(filename: str):
+    size = os.path.getsize(filename)
+    if size == 0:
+        return None
+    with open(filename, "rb") as file:
+        obj = pickle.load(file)
+    return obj
+
+
+def disasm(in_path: str = os.path.join(VULMCP_ROOT_PATH, "main.dis"), USE_LOCAL_PICKLE: bool = True):
+    global panda_re_global
+    try:
+        if USE_LOCAL_PICKLE and os.path.isfile(LOCAL_DEFAULT_PANDARE_PKL):
+            panda_re: PandaReverser = pickle_load_object(LOCAL_DEFAULT_PANDARE_PKL)
+            if isinstance(panda_re, PandaReverser):
+                panda_re_global = panda_re
+                return
+    except Exception as e:
+        print(f"load PandaReverser from pickle file failed, reverse it now...| exception: {e}")
     if (in_path.endswith(".dis")):
         dis_file: DisFile = DisFile(in_path)
     elif (in_path.endswith(".hap")):
@@ -33,7 +58,7 @@ def disasm(in_path: str = os.path.join(VULMCP_ROOT_PATH, "main.dis")):
     panda_re: PandaReverser = PandaReverser(dis_file)
     panda_re.trans_lift_all_method(DEBUG_LV=0)
     panda_re.module_analysis_algorithms()
-    global panda_re_global
+    pickle_save_object(panda_re, LOCAL_DEFAULT_PANDARE_PKL)
     panda_re_global = panda_re
 
 
@@ -55,7 +80,7 @@ def get_all_module_method() -> List[str]:
         return module_methd_name_l
 
 
-def get_module_method_panda_assembly_code(module_method_name: str) -> str:
+async def get_module_method_panda_assembly_code(module_method_name: str) -> str:
     global panda_re_global
     panda_re = panda_re_global
     if panda_re is None:
@@ -64,7 +89,12 @@ def get_module_method_panda_assembly_code(module_method_name: str) -> str:
     if module_name not in panda_re.dis_file.methods or method_name not in panda_re.dis_file.methods[module_name]:
         return ""
     method: AsmMethod = panda_re.dis_file.methods[module_name][method_name]
-    return method.str_for_LLM()
+    return f"ArkTS assembly code of: module name: {module_name}  method name: {method_name}\n" + method.str_for_LLM()
+
+
+async def get_external_file_content(file_name: str) -> str:
+    global panda_re_global
+    raise NotImplementedError()
 
 
 if __name__ == "__main__":

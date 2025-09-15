@@ -8,6 +8,7 @@
 *.abc
 *.log
 *.whl
+*.pkl
 ark_disasm
 
 

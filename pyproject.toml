@@ -12,7 +12,7 @@ dependencies = [
     "yara-python>=4.5.4",
     "llvmlite>=0.44.0",
     "httpx>=0.28.1",
-    "ohre @ file:///Users/koki/git_space/MCP/VulnerMCP/tools/ohre-0.1.dev67+g20f6673c3.d20250912-py3-none-any.whl",
+    "ohre @ file:///Users/koki/git_space/MCP/VulnerMCP/tools/ohre-0.1.dev70+g4e8ef0d10-py3-none-any.whl",
     "asyncio>=4.0.0",
     "aiofiles>=24.1.0",
 ]

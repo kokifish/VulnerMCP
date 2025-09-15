@@ -594,6 +594,11 @@ The MCP protocol defines three core primitives that servers can implement:
 
 - Prompts: 用户控制，用户选择的交互模板
 
+- 写好各个primitive的描述，LLM会读
+- 把错误抛出(`raise Error`)当文档/prompt写，LLM会读取错误信息，如果抛出的错误信息中带有正确的调用示范或者提示信息，那么下一轮对话就更可能用正确的参数访问mcp server
+
+
+
 **Server Capabilities**
 
 MCP服务器功能
@@ -817,6 +822,9 @@ Structured results are automatically validated against the output schema generat
 | `resources/subscribe`      | Monitor resource changes        | Subscription confirmation              |
 
 > 因此Inspector里面resource会有两个list，一个是list直接资源，一个list模版资源
+
+- `resources/list`: Cline的MCP Client是在启动的时候调用`resources/list`，因此会话开始时不会有`resources/list`
+- `resources/read`: 
 
 ### Prompts: Interaction Templates
 

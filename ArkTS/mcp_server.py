@@ -1,23 +1,31 @@
 import asyncio
+import fnmatch
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
+from urllib.parse import quote, unquote
 
 import arkts_api
 import mcp.types as types
 from mcp.server import Server
+from mcp.server.fastmcp.exceptions import ResourceError
+from mcp.shared.context import RequestContext
 from mcp.server.fastmcp.server import Context
 from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
-from mcp.server.fastmcp.exceptions import ResourceError
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
-from mcp.types import EmbeddedResource, ImageContent, TextContent, Tool, ReadResourceResult
-from pydantic import AnyUrl, FileUrl, BaseModel, Field
-from urllib.parse import unquote, quote
-from mcp.server.lowlevel.helper_types import ReadResourceContents
-import re
+from mcp.types import (
+    EmbeddedResource,
+    ImageContent,
+    ReadResourceResult,
+    TextContent,
+    Tool,
+)
+from pydantic import AnyUrl, BaseModel, Field, FileUrl
 
 VULMCP_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 logging.basicConfig(
@@ -41,7 +49,57 @@ class PandaAssemblyModuleMethodName(BaseModel):
         ...,
         description="The module and method name of the Panda Assembly format file. e.g. A.B means module A method B",)
 
-# 获取MCP/VulnerMCP/Vulwebview.abc.dis文件的ABC模块的Panda Assembly格式
+
+async def read_pa_by_url(uri: AnyUrl) -> list[str]:
+    Log.info(f"read-pa: uri: {uri} | host:{uri.host} path:{uri.path} {uri.port} {uri.query} {uri.unicode_string()}")
+    VALUE_ERROR_MSG = f"Invalid resource path: {uri}. Valid resource URL example: panda://Index%26.%23%2A%23 (for specific match of Index&.#*#), panda://*module_name* (for wildcard matching of all methods in module/class named `module_name`). Check URL encoding or use wildcard matching if it still failed."
+    res_pattern = uri.unicode_string()
+    if len(res_pattern) <= 8 or not res_pattern.startswith("panda://"):
+        raise ResourceError(VALUE_ERROR_MSG)
+    res_pattern = res_pattern.lstrip("panda://")
+    all_res = arkts_api.get_all_module_method()  # original module.method name, NOT quoted
+
+    matched_res = []
+    if unquote(res_pattern) in all_res:  # one-to-one match
+        matched_res = [res_pattern]
+    elif res_pattern in all_res:  # one-to-one match
+        matched_res = [quote(res_pattern)]
+    elif "*" in res_pattern:  # * match mode
+        pattern = res_pattern.replace(".", r"\.").replace("*", ".*")
+        pattern_unquoted = unquote(res_pattern).replace(".", r"\.").replace("*", ".*")
+        regex = re.compile(f"^{pattern}$")  # re.compile(f"^{pattern}$")
+        regex_unquoted = re.compile(f"^{pattern_unquoted}$")
+        matched_res = [quote(res) for res in all_res if (regex.match(quote(res)) or regex.match(res))]
+        matched_res.extend([quote(res) for res in all_res if (
+            regex_unquoted.match(quote(res)) or regex_unquoted.match(res))])
+
+    if len(matched_res) == 0:  # It is better to return more unnecessary code than to return nothing
+        matched_res = [quote(s) for s in all_res if (unquote(res_pattern) in s or res_pattern in s)]
+
+    tasks = [arkts_api.get_module_method_panda_assembly_code(unquote(resource)) for resource in matched_res]
+    contents: list[str] = await asyncio.gather(*tasks)
+    if len(contents) == 0:
+        raise ResourceError(
+            VALUE_ERROR_MSG + f" Matched resource URL not exists. matched_res: {matched_res}. contents {contents}. res_pattern {res_pattern}")
+    return contents
+
+
+async def get_resource_related(code_or_name: str) -> list[TextContent]:
+    Log.info(f"get_resource_related: read: {code_or_name}")
+    contents: list = []
+    if "(any:" not in code_or_name:  # resource url or module method name
+        if not code_or_name.startswith("panda://"):
+            code_or_name = "panda://" + code_or_name
+
+        contents = await read_pa_by_url(AnyUrl(code_or_name))
+
+        if len(contents):
+            return [TextContent(type="text", text=asm_txt) for asm_txt in contents]
+        else:
+            return []
+    else:  # code with Panda Assembly format (lifted)
+        return get_resource_related(
+            AnyUrl(f"panda://&vulwebview.src.main.ets.pages.Index&.#~@0>#aboutToAppear"))
 
 
 async def serve() -> None:
@@ -67,49 +125,46 @@ async def serve() -> None:
             Tool(
                 name="get_resource_related",  # type: str, the function name of this tool
                 # actually it just is a display name if you already implemented the call_tool method
-                description="Provide all possible relevant resource(e.g. ArkTS assembly code) based on the ArkTS/panda assembly code or moudle method name. The assembly code snippets provided should be as complete as possible.",
+                description="Provide relevant resource(e.g. ArkTS assembly code) based on the ArkTS/panda assembly code or module method name. The assembly code snippets provided should be as complete as possible. If provide a module method name like `module_A.method_B`, it's better to provide a wildcard matching pattern like `module_A.*`",
                 # the most important field for LLM to understand what this tool is doing
                 inputSchema={
                     "type": "object",
-                    "properties": {"code_or_name": {"type": "string", "description": "panda assembly code snippets or module method name"}},
+                    "properties": {"code_or_name": {"type": "string", "description": "Panda assembly code snippets or module method name."}},
                     "required": ["code_or_name"],
                 },
             )
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict, ctx: RequestContext) -> list[TextContent]:
         """reponse of Client->Server tools/call request"""
         Log.info(f"tools/call called")
-        try:
-            match name:
-                # case "get_resource_url_related":  # should match the str-id in tools/list
-                #     panda_assembly_code = arguments.get("panda_assembly_code")
-                #     if not panda_assembly_code:
-                #         raise ValueError("Missing required argument: panda_assembly_code")
+        Log.info(f"ctx.request_id is {ctx.request_id}")
+        match name:
+            # case "get_resource_url_related":  # should match the str-id in tools/list
+            #     panda_assembly_code = arguments.get("panda_assembly_code")
+            #     if not panda_assembly_code:
+            #         raise ValueError("Missing required argument: panda_assembly_code")
 
-                #     result = r"panda://%26vulwebview.src.main.ets.pages.Index%26.%23~%400%3E%23aboutToAppear"
-                #     return [TextContent(type="text", text=f"{result}")]
-                case "get_resource_related":
-                    code_or_name = arguments.get("code_or_name")
-                    if not code_or_name:
-                        raise ValueError("Missing required argument: code_or_name")
-                    return await get_resource_related(code_or_name)
-                case _:
-                    raise ValueError(f"Unknown tool: {name}")
+            #     result = r"panda://%26vulwebview.src.main.ets.pages.Index%26.%23~%400%3E%23aboutToAppear"
+            #     return [TextContent(type="text", text=f"{result}")]
+            case "get_resource_related":
+                code_or_name = arguments.get("code_or_name")
+                if not code_or_name:
+                    raise ValueError("Missing required argument: code_or_name")
+                return await get_resource_related(code_or_name)
+            case _:
+                raise ValueError(f"Unknown tool: {name}")
 
-            return [TextContent(type="text", text=f"{result}")]
-
-        except Exception as e:
-            raise ValueError(f"Error processing mcp-server-time query: {str(e)}")
+        return [TextContent(type="text", text=f"{result}")]
 
     @server.list_resources()
-    async def get_all_resources() -> list[types.Resource]:
+    async def list_all_resources() -> list[types.Resource]:
         module_methd_name_l = arkts_api.get_all_module_method()
         Log.info(f"resource: list. module_methd_name_l len = {len(module_methd_name_l)}")
         pa_resources = [
             types.Resource(
-                uri=AnyUrl(f"panda://{quote(module_method_name)}"),
+                uri=AnyUrl(f"panda://{quote(module_method_name)}"),  # quote(module_method_name)
                 name=module_method_name,
                 title="Panda Assembly of " + module_method_name,
                 description="The decompiled assembly code with Panda Assembly format of module.method = "
@@ -122,45 +177,19 @@ async def serve() -> None:
 
     @server.read_resource()
     async def read_resource_impl(uri: AnyUrl) -> list[ReadResourceContents]:
-        Log.info(f"resource: read: {uri} | host:{uri.host} path:{uri.path}")
-        if uri.host is None:
-            raise ValueError(f"Invalid resource path: {uri}")
+        contents = await read_pa_by_url(uri)
+        return [ReadResourceContents(content=asm_txt, mime_type="text/plain") for asm_txt in contents]
 
-        resource_pattern = uri.host
-        all_resources = arkts_api.get_all_module_method()
-
-        matched_resources = []
-        if "*" in resource_pattern:  # * match mode
-            pattern = resource_pattern.replace(".", r"\.").replace("*", ".*")
-            regex = re.compile(f"^{pattern}$")
-            matched_resources = [quote(res) for res in all_resources if regex.match(quote(res))]
-        elif unquote(resource_pattern) in all_resources:
-            matched_resources = [unquote(resource_pattern)]
-        else:
-            matched_resources = [s for s in all_resources if unquote(resource_pattern) in s]
-            if len(matched_resources) == 0:
-                raise ResourceError(f"Unknown module.method name: {resource_pattern}")
-
-        contents: list[ReadResourceContents] = []
-        for resource in matched_resources:
-            decoded_name = unquote(resource)
-            asm_txt = arkts_api.get_module_method_panda_assembly_code(decoded_name)
-            if len(asm_txt) > 0:
-                contents.append(ReadResourceContents(content=asm_txt, mime_type="text/plain"))
-        return contents
-
-    async def get_resource_related(code_or_name: str) -> list:
-        Log.info(f"get_resource_related: read: {code_or_name}")
-        contents: list = []
-        if "(any:" not in code_or_name:  # resource url or module method name
-            code_or_name = code_or_name.lstrip("panda://")
-            resource_content = await server.read_resource(AnyUrl(f"panda://{code_or_name}"))
-        else:  # code with Panda Assembly format (lifted)
-            resource_content = await server.read_resource(
-                AnyUrl(f"panda://&vulwebview.src.main.ets.pages.Index&.#~@0>#aboutToAppear"))
-        for item in resource_content:
-            contents.append(TextContent(type="text", text=item.content))
-        return contents
+    @server.list_prompts()
+    async def handle_list_prompts() -> list[types.Prompt]:
+        """reponse of Client->Server prompts/list request"""
+        return [
+            types.Prompt(
+                name="example-prompt",
+                description="An example prompt template",
+                arguments=[types.PromptArgument(name="arg1", description="Example argument", required=True)],
+            )
+        ]
 
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):
