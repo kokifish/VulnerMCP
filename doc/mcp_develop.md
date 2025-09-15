@@ -806,6 +806,7 @@ Structured results are automatically validated against the output schema generat
 
 - `Resources`向LLM暴露数据。类似REST API的GET
 - 不应有大量计算或有副作用。
+- URL应具有唯一性，相同URL后注册的会覆盖前注册的
 
 分为两种resources：
 

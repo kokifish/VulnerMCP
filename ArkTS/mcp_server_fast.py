@@ -3,19 +3,17 @@ import logging
 import os
 import sys
 from logging.handlers import RotatingFileHandler
-from mcp.server.fastmcp import FastMCP
+from urllib.parse import quote, unquote
+
 import arkts_api
-import mcp.types as types
-from mcp.server import Server
-from mcp.server.fastmcp.server import Context
-from mcp.server.lowlevel import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
+from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ResourceError
+from mcp.server.fastmcp.server import Context
+from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
 from mcp.types import EmbeddedResource, ImageContent, TextContent, Tool
-from pydantic import AnyUrl, FileUrl, BaseModel, Field
-from urllib.parse import unquote, quote
+from pydantic import AnyUrl, BaseModel, Field, FileUrl
 
 VULMCP_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 logging.basicConfig(
