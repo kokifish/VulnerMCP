@@ -120,8 +120,8 @@ async def serve() -> None:
 
     @server.list_resources()
     async def list_all_resources() -> list[types.Resource]:
-        module_methd_name_l = await arkts_api.get_all_module_method()
-        Log.info(f"resource: list. module_methd_name_l len = {len(module_methd_name_l)}")
+        module_method_name_l = arkts_api.get_all_module_method()
+        Log.info(f"resource: list. module_method_name_l len = {len(module_method_name_l)}")
         pa_resources = [
             types.Resource(
                 uri=AnyUrl(f"panda://{quote(module_method_name)}"),  # quote(module_method_name)
@@ -130,7 +130,7 @@ async def serve() -> None:
                 description=f"The ArkTS decompiled assembly code with Panda Assembly format of {module_method_name}",
                 mimeType="text/plain",
             )
-            for module_method_name in module_methd_name_l
+            for module_method_name in module_method_name_l
         ]
         return pa_resources
 

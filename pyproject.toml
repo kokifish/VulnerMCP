@@ -15,4 +15,11 @@ dependencies = [
     "ohre @ file:///Users/koki/git_space/MCP/VulnerMCP/tools/ohre-0.1.dev70+g4e8ef0d10-py3-none-any.whl",
     "asyncio>=4.0.0",
     "aiofiles>=24.1.0",
+    "pendulum>=3.1.0",
+    "pathlib>=1.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
 ]

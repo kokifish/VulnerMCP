@@ -10,7 +10,9 @@
 *.whl
 *.pkl
 ark_disasm
-
+tmp_extract/
+tmp_hap_extract/
+tmp_app_extract/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
