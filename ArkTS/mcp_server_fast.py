@@ -6,12 +6,13 @@ from logging.handlers import RotatingFileHandler
 from urllib.parse import quote, unquote
 
 import arkts_api
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context, Image
 from mcp.server.fastmcp.server import Context
 from mcp.server.models import InitializationOptions
 from mcp.shared.exceptions import McpError
-from mcp.types import EmbeddedResource, ImageContent, TextContent, Tool, ToolAnnotations
+from mcp.types import EmbeddedResource, ImageContent, TextContent, TextResourceContents, Tool, ToolAnnotations
 from pydantic import AnyUrl, BaseModel, Field, FileUrl
+
 
 VULMCP_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)
@@ -55,8 +56,8 @@ async def read_panda_assembly_template(module_method_name: str) -> str:
 
 @mcp.tool("get_resource_related", title="get resource related including assmebly code or raw file",
           description="Provide relevant resource(e.g. ArkTS assembly code) based on the ArkTS/panda assembly code or module method name. The assembly code snippets provided should be as complete as possible. If provide a module method name like `module_A.method_B`, it's better to provide a wildcard matching pattern like `module_A.*`",
-          annotations=ToolAnnotations(
-              title="get resource related including assmebly code or raw file", readOnlyHint=True))
+          annotations=ToolAnnotations(title="get resource related", readOnlyHint=True, openWorldHint=False),
+          structured_output=True)
 async def get_resource_related(code_or_name: str) -> list[str]:
     Log.info(f"get_resource_related: arg={code_or_name}")
     contents: list = []

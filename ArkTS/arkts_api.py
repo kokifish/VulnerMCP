@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import pickle
 import re
@@ -11,7 +12,10 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 from urllib.parse import quote, unquote
-
+from pathlib import Path
+import aiofiles
+from pathspec import PathSpec
+import magic
 import ohre
 import ohre.misc.utils as oh_utils
 from mcp.shared.exceptions import McpError
@@ -28,7 +32,7 @@ ohre.set_log_print(False)
 VULMCP_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 ARK_DISASM = os.path.join(VULMCP_ROOT_PATH, "tools", "ark_disasm")
-TMP_HAP_EXTRACT = os.path.join(VULMCP_ROOT_PATH, "tmp_hap_extract")
+TMP_EXTRACT = os.path.join(VULMCP_ROOT_PATH, "tmp_extract")
 # load it by default everytime, if it NOT exists, load it from DEFAULT_HAP_PATH or in_path
 LOCAL_DEFAULT_PANDARE_PKL = os.path.join(VULMCP_ROOT_PATH, "main_pandare.pkl")
 DEFAULT_HAP_PATH = os.path.join(VULMCP_ROOT_PATH, "main.hap")  # load it by default everytime
@@ -101,8 +105,8 @@ def _disasm(in_path: str = DEFAULT_HAP_PATH, USE_LOCAL_PICKLE: bool = False):
             os.remove(path_default)
             shutil.copy2(in_path, path_default)
         OH_APP_OR_HAP_G = hhap
-        hhap.extract_all_to(TMP_HAP_EXTRACT)
-        abc_file = os.path.join(TMP_HAP_EXTRACT, "ets", "modules.abc")
+        hhap.extract_all_to(TMP_EXTRACT)
+        abc_file = os.path.join(TMP_EXTRACT, "ets", "modules.abc")
         dis_file_name = f"{os.path.splitext(os.path.basename(in_path))[0]}.abc.dis"  # os.path.splitext(file_name)[0]
         result = subprocess.run([ARK_DISASM, abc_file, dis_file_name], capture_output=True, text=True)
         dis_file: DisFile = DisFile(dis_file_name)
@@ -159,11 +163,6 @@ async def get_module_method_panda_assembly_code(module_method_name: str) -> str:
     return f"ArkTS assembly code of module name={module_name}  method name={method_name}:\n" + method.str_for_LLM()
 
 
-async def get_external_file_content(file_name: str) -> str:
-    global OH_APP_OR_HAP_G
-    raise NotImplementedError()
-
-
 async def read_pa_by_url(uri: AnyUrl) -> list[str]:
     """get ArkTS assembly by uri like panda://module.method, wildcard matching supported."""
     Log.info(f"read-pa: uri: {uri} | host:{uri.host} path:{uri.path} {uri.port} {uri.query} {uri.unicode_string()}")
@@ -199,8 +198,91 @@ async def read_pa_by_url(uri: AnyUrl) -> list[str]:
             VALUE_ERROR_MSG + f" Matched resource URL not exists. matched_res: {matched_res}. contents {contents}. res_pattern {res_pattern}")
     return contents
 
-if __name__ == '__main__':
+
+def check_file_type(file_path: str) -> tuple[str, str]:
+    MIME_TYPE_MAP_MAGIC = {"application/json": "text"}
+
+    def get_short_type(mime_long_type_name: str) -> str:
+        if mime_long_type_name in MIME_TYPE_MAP_MAGIC:
+            return MIME_TYPE_MAP_MAGIC[mime_long_type_name]
+        if mime_long_type_name.startswith("text/"):
+            return "text"
+        if mime_long_type_name.startswith("image/"):
+            return "image"
+        if mime_long_type_name.startswith("audio/"):
+            return "audio"
+        if mime_long_type_name.startswith("video/"):
+            return "video"
+        return "UNKNOWN"
+
+    if not os.path.exists(file_path):
+        return ""
+    try:
+        mime_obj = magic.Magic(mime=True)
+        mime_type = mime_obj.from_file(file_path)
+        Log.info(f"mime from magic: {type(mime_type)} {mime_type} | {file_path}")
+        if isinstance(mime_type, str):
+            return get_short_type(mime_type), mime_type
+
+    except Exception as e:
+        Log.error(f"Error getting file type with magic: {e} | file_path {file_path}")
+    mime_type, tmp = mimetypes.guess_type(file_path)
+    Log.info(f"mime from mimetypes: {type(mime_type)} {mime_type} {type(tmp)} {tmp} | {file_path}")
+    if isinstance(mime_type, str):
+        return get_short_type(mime_type), mime_type
+    return "UNKNOWN", "UNKNOWN"
+
+
+def match_file_in_path(match_pattern: str, dir_path: str = TMP_EXTRACT) -> List[str]:
+    ret = list()
+    spec = PathSpec.from_lines("gitwildmatch", [match_pattern])
+    base_path = Path(dir_path).resolve()
+    if not base_path.is_dir():
+        return ret
+
+    for item_path in base_path.rglob("*"):
+        rel_path = str(item_path.relative_to(base_path))
+        if spec.match_file(rel_path):
+            ret.append(rel_path)
+    return ret
+
+
+async def async_match_file_in_path(match_pattern: str, dir_path: str = TMP_EXTRACT) -> List[str]:
+    return await asyncio.to_thread(match_file_in_path, match_pattern, dir_path)
+
+
+async def read_file_async_aiofiles(file_path: str) -> str:
+    async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+        content = await f.read()
+    return content
+
+
+async def get_external_file_content(match_pattern: str) -> str:
+    global OH_APP_OR_HAP_G
+    RESOURCE_FILE_HINT = f"File {match_pattern} not exists, try to use a file name without path. Or get raw file list to check if the path is right."
+    matched_file_l = await async_match_file_in_path(match_pattern, TMP_EXTRACT)
+    Log.info(f"match file: {match_pattern} | {len(matched_file_l)} {matched_file_l}")
+    if len(matched_file_l) == 1:
+        full_path = os.path.join(TMP_EXTRACT, matched_file_l[0])
+        type_short_name, mime_type = check_file_type(full_path)
+        Log.info(f"type_short_name {type_short_name}")
+        if type_short_name == "text":
+            Log.info(f"match file specific: {full_path}")
+            return await read_file_async_aiofiles(full_path)
+        else:
+            raise McpError(f"File {match_pattern} matched, but the mime type {mime_type} is not supported.")
+    elif len(matched_file_l) == 0:
+        raise McpError(RESOURCE_FILE_HINT)
+    Log.warning(f"match multi file: {match_pattern} | {len(matched_file_l)} {matched_file_l}")
+
+
+if __name__ == "__main__":
+    if os.path.exists(LOCAL_DEFAULT_PANDARE_PKL):
+        os.remove(LOCAL_DEFAULT_PANDARE_PKL)
     ret = get_all_module_method()  # asyncio.run(
     Log.info(f"get_all_module_method: {len(ret)} {ret}")
 
     Log.info(quote("&vulwebview.src.main.ets.pages.Index&.#~@0>#aboutToAppear"))
+    tmp = asyncio.run(get_external_file_content("*.json"))
+    tmp = asyncio.run(get_external_file_content("SomeComponent.json"))
+    Log.info(f"get_external_file_content: {tmp}")
