@@ -12,18 +12,18 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 from urllib.parse import quote, unquote
-from pathlib import Path
+
 import aiofiles
-from pathspec import PathSpec
 import magic
 import ohre
 import ohre.misc.utils as oh_utils
-from mcp.shared.exceptions import McpError
+from mcp.server.fastmcp.exceptions import ResourceError
 from ohre.abcre.dis.AsmMethod import AsmMethod
 from ohre.abcre.dis.DisFile import DisFile
 from ohre.abcre.dis.PandaReverser import PandaReverser, generate_content
 from ohre.core.oh_app import oh_app
 from ohre.core.oh_hap import oh_hap
+from pathspec import PathSpec
 from pydantic import AnyUrl, BaseModel, Field, FileUrl
 
 ohre.set_log_print(False)
@@ -151,9 +151,10 @@ def get_all_module_method() -> List[str]:
         return module_method_name_l
 
 
-async def get_module_method_panda_assembly_code(module_method_name: str) -> str:
+def get_module_method_panda_assembly_code(module_method_name: str) -> str:
     global PANDA_RE_G
     panda_re = PANDA_RE_G
+    Log.info(f"read pa START: {module_method_name}")
     if panda_re is None:
         raise ValueError("PANDA_RE_G is None, please init first")
     module_name, method_name = oh_utils.split_to_module_method_name(module_method_name)
@@ -163,13 +164,13 @@ async def get_module_method_panda_assembly_code(module_method_name: str) -> str:
     return f"ArkTS assembly code of module name={module_name}  method name={method_name}:\n" + method.str_for_LLM()
 
 
-async def read_pa_by_url(uri: AnyUrl) -> list[str]:
+def read_pa_by_url(uri: AnyUrl) -> list[str]:
     """get ArkTS assembly by uri like panda://module.method, wildcard matching supported."""
     Log.info(f"read-pa: uri: {uri} | host:{uri.host} path:{uri.path} {uri.port} {uri.query} {uri.unicode_string()}")
     VALUE_ERROR_MSG = f"Invalid resource path: {uri}. Valid resource URL example: panda://Index%26.%23%2A%23 (for specific match of Index&.#*# using URL encoding), panda://*module_name* (for wildcard matching of all methods in module/class named `module_name`). Check URL encoding or use wildcard matching if it still failed."
     res_pattern = uri.unicode_string()
     if len(res_pattern) <= 8 or not res_pattern.startswith("panda://"):
-        raise McpError(VALUE_ERROR_MSG)
+        raise ResourceError(VALUE_ERROR_MSG)
     res_pattern = res_pattern.lstrip("panda://")
     all_res = get_all_module_method()  # original module.method name, NOT quoted
 
@@ -191,10 +192,9 @@ async def read_pa_by_url(uri: AnyUrl) -> list[str]:
     if len(matched_res) == 0:  # It is better to return more unnecessary code than to return nothing
         matched_res = [quote(s) for s in all_res if (unquote(res_pattern) in s or res_pattern in s)]
 
-    tasks = [get_module_method_panda_assembly_code(unquote(resource)) for resource in matched_res]
-    contents: list[str] = await asyncio.gather(*tasks)
+    contents: list[str] = [get_module_method_panda_assembly_code(unquote(resource)) for resource in matched_res]
     if len(contents) == 0:
-        raise McpError(
+        raise ResourceError(
             VALUE_ERROR_MSG + f" Matched resource URL not exists. matched_res: {matched_res}. contents {contents}. res_pattern {res_pattern}")
     return contents
 
@@ -261,7 +261,7 @@ async def get_external_file_content(match_pattern: str) -> str:
     global OH_APP_OR_HAP_G
     RESOURCE_FILE_HINT = f"File {match_pattern} not exists, try to use a file name without path. Or get raw file list to check if the path is right."
     matched_file_l = await async_match_file_in_path(match_pattern, TMP_EXTRACT)
-    Log.info(f"match file: {match_pattern} | {len(matched_file_l)} {matched_file_l}")
+    Log.info(f"match file START: {match_pattern} | {len(matched_file_l)} {matched_file_l}")
     if len(matched_file_l) == 1:
         full_path = os.path.join(TMP_EXTRACT, matched_file_l[0])
         type_short_name, mime_type = check_file_type(full_path)
@@ -270,10 +270,19 @@ async def get_external_file_content(match_pattern: str) -> str:
             Log.info(f"match file specific: {full_path}")
             return await read_file_async_aiofiles(full_path)
         else:
-            raise McpError(f"File {match_pattern} matched, but the mime type {mime_type} is not supported.")
+            raise ResourceError(f"File {match_pattern} matched, but the mime type {mime_type} is not supported.")
     elif len(matched_file_l) == 0:
-        raise McpError(RESOURCE_FILE_HINT)
+        raise ResourceError(RESOURCE_FILE_HINT)
     Log.warning(f"match multi file: {match_pattern} | {len(matched_file_l)} {matched_file_l}")
+
+
+def get_external_text_file_list() -> list[str]:
+    ret: list[str] = list()
+    for file_path in OH_APP_OR_HAP_G.get_files():
+        type_short_name, mime_type = check_file_type(os.path.join(TMP_EXTRACT, file_path))
+        if type_short_name == "text":
+            ret.append(file_path)
+    return ret
 
 
 if __name__ == "__main__":
@@ -286,3 +295,4 @@ if __name__ == "__main__":
     tmp = asyncio.run(get_external_file_content("*.json"))
     tmp = asyncio.run(get_external_file_content("SomeComponent.json"))
     Log.info(f"get_external_file_content: {tmp}")
+    ret = get_external_text_file_list()

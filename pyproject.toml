@@ -22,6 +22,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "httpx>=0.28.1",
-]
+dev = ["httpx>=0.28.1"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ArkTS*"]
+exclude = ["tmp_*"]
+
+[tool.setuptools.package-data]
+"ArkTS" = ["*.json", "*.txt", "*.yaml"]
