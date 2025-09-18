@@ -6,7 +6,6 @@ from urllib.parse import quote, unquote
 
 import arkts_api
 from mcp.server.fastmcp import Context, FastMCP, Image
-from mcp.server.models import InitializationOptions
 from mcp.types import Tool, ToolAnnotations
 from pydantic import AnyUrl, BaseModel, Field, FileUrl
 
@@ -84,25 +83,40 @@ for res_path in external_res_path_l:
 
 
 @mcp.tool("get_resource_related", title="get resource related including assmebly code or raw file",
-          description="Provide relevant resource(e.g. ArkTS assembly code) based on the ArkTS/panda assembly code or module method name. The assembly code snippets provided should be as complete as possible. If provide a module method name like `module_A.method_B`, it's better to provide a wildcard matching pattern like `module_A.*`",
+          description="Provide relevant resource(e.g. ArkTS assembly code, external resource file) based on the ArkTS/panda assembly code or module method name. The assembly code snippets provided should be as complete as possible. If provide a module method name like `module_A.method_B`, it's better to provide a wildcard matching pattern like `*module_A.*`. Don't provide the content of a resource file.",
           annotations=ToolAnnotations(title="get resource related", readOnlyHint=True, openWorldHint=False),
           structured_output=True)
-def get_resource_related(code_or_name: str) -> list[str]:
-    Log.info(f"get_resource_related: arg={code_or_name}")
-    contents: list = []
-    if "(any:" not in code_or_name:  # resource url or module method name
+async def get_resource_related(code_or_name: str) -> list[str]:
+    Log.info(f"mcp-tool get res: arg={code_or_name} {type(code_or_name)}")
+    if "(any:" not in code_or_name and len(code_or_name.splitlines()) == 1:  # resource url or module method name
+        contents: list[str] = []
         if not code_or_name.startswith("panda://"):
-            code_or_name = "panda://" + code_or_name
+            panda_url = "panda://" + code_or_name
+        else:
+            panda_url = code_or_name
         try:
-            contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(code_or_name))
-            Log.info(f"get_resource_related: return len={len(contents)}")
+            contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(panda_url))
+            Log.info(f"mcp-tool get res: return len={len(contents)}")
         except Exception as e:
-            contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(unquote(code_or_name)))
-            Log.info(f"get_resource_related-unquote: return len={len(contents)}")
+            contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(unquote(panda_url)))
+            Log.info(f"mcp-tool get res: unquote return len={len(contents)}")
+        Log.info(f"return: {type(contents)} {contents}")
         return contents
     else:  # code with Panda Assembly format (lifted)
-        return get_resource_related(
-            AnyUrl(f"panda://&vulwebview.src.main.ets.pages.Index&.#~@0>#aboutToAppear"))
+        name_l = code_or_name.split()
+        Log.info(f"mcp-tool get res: after split {len(name_l)} {name_l}")
+        ret_content_l: list[str] = list()
+        return_e: Exception = None
+        for name in name_l:
+            try:
+                ret_content_l.append(await arkts_api.get_external_file_content(name))
+            except Exception as e:
+                return_e = e
+        if return_e is not None and len(ret_content_l) == 0:
+            Log.warning(f"mcp-tool get res: exception {return_e}")
+            raise return_e
+        Log.info(f"return: {type(ret_content_l)} {ret_content_l}")
+        return ret_content_l
 
 
 if __name__ == "__main__":

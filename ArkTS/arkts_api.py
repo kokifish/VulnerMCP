@@ -259,7 +259,7 @@ async def read_file_async_aiofiles(file_path: str) -> str:
 
 async def get_external_file_content(match_pattern: str) -> str:
     global OH_APP_OR_HAP_G
-    RESOURCE_FILE_HINT = f"File {match_pattern} not exists, try to use a file name without path. Or get raw file list to check if the path is right."
+    RESOURCE_FILE_HINT = f"File not exists, try to use a file name without path. Or check resource list in mcp."
     matched_file_l = await async_match_file_in_path(match_pattern, TMP_EXTRACT)
     Log.info(f"match file START: {match_pattern} | {len(matched_file_l)} {matched_file_l}")
     if len(matched_file_l) == 1:
@@ -274,6 +274,8 @@ async def get_external_file_content(match_pattern: str) -> str:
     elif len(matched_file_l) == 0:
         raise ResourceError(RESOURCE_FILE_HINT)
     Log.warning(f"match multi file: {match_pattern} | {len(matched_file_l)} {matched_file_l}")
+    file_l_str = ", ".join(matched_file_l)
+    raise ResourceError(f"Multiple file matched: {file_l_str}. Plese select only 1 file to access.")
 
 
 def get_external_text_file_list() -> list[str]:
