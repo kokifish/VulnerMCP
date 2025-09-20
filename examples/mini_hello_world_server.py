@@ -6,6 +6,7 @@ from logging.handlers import RotatingFileHandler
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 from mcp.server.fastmcp.prompts import base
+from pydantic import BaseModel, Field
 
 GIT_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)
@@ -21,7 +22,7 @@ mcp = FastMCP("hello_world")  # corresponding to mcp server name in mcp-servers-
 
 @mcp.tool("get_location", title="get location",  # tool
           description="get location of the giving user name")
-def get_location_of_user(user_name: str, ctx: Context) -> str:
+def get_location_of_user(user_name: str = Field(description="developer name of project"), ctx: Context = None) -> str:
     Log.info(f"tool: user_name {user_name} {ctx.model_config} {ctx.fastmcp.name} | {ctx.session.client_params}")
     if user_name == "CoreA" or user_name == "MainA":
         return "SZ"
