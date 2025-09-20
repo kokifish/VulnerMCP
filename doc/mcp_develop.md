@@ -41,12 +41,12 @@ graph TB
     style Server3 fill:#f3e5f5
 ```
 
-| Feature     | Explanation                                                  | Data Flow          | Request        | Response       |
+| Feature     | Explanation                                                  | S->D Data Flow     | Request        | Response       |
 | ----------- | ------------------------------------------------------------ | ------------------ | -------------- | -------------- |
 | Tools       | Host让Server做些操作                                         | Server->H          | H->C->S        | S->C->H        |
 | Resources   | Host向Server拿数据                                           | Server->H          | H->C->S        | S->C->H        |
 | Prompts     |                                                              |                    |                |                |
-| Roots       | Client告诉Server可以读写哪些路径。唯一MCP读写Local Files的   | LocalFiles->Server | H->C->S        | -              |
+| Roots       | Client告诉Server可以读写哪些路径。唯一涉及本地文件的功能     | LocalFiles->Server | H->C->S        | -              |
 | Sampling    | Server通过Client使用LLM。唯一MCP利用LLM的                    | LLM->Server        | S->C->[U]->LLM | LLM->C->[U]->S |
 | Elicitation | Server向User请求补充信息/确认。唯一Server一定要从User拿信息的 | User->Server       | S->C->U        | U->C->S        |
 
@@ -316,9 +316,9 @@ Authentication can be used by servers that want to expose tools accessing protec
 
 | Feature         | Explanation                                                  | Example                                                      |
 | --------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| **Sampling**    | Sampling allows servers to request LLM completions through the client, enabling an agentic workflow. This approach puts the client in complete control of user permissions and security measures. | A server for booking travel may send a list of flights to an LLM and request that the LLM pick the best flight for the user. |
-| **Roots**       | client给server指定哪些文件可以访问，引导server到对应目录，同时保证安全边界。 Roots allow clients to specify which files servers can access, guiding them to relevant directories while maintaining security boundaries. | A server for booking travel may be given access to a specific directory, from which it can read a user’s calendar. |
-| **Elicitation** | 按需允许server向user请求信息/确认。Elicitation enables servers to request specific information from users during interactions, providing a structured way for servers to gather information on demand. | A server booking travel may ask for the user’s preferences on airplane seats, room type or their contact number to finalise a booking. |
+| **Sampling**    | 允许Server通过Client向LLM提问。这种实现方式让Client能完全控制用户权限、保障安全。Sampling allows servers to request LLM completions through the client, enabling an agentic workflow. This approach puts the client in complete control of user permissions and security measures. | A server for booking travel may send a list of flights to an LLM and request that the LLM pick the best flight for the user. Server预定行程的时候向LLM询问哪个航班更适合用户。 |
+| **Roots**       | client给server指定哪些文件可以访问，引导server到对应目录，同时保证安全边界。 Roots allow clients to specify which files servers can access, guiding them to relevant directories while maintaining security boundaries. | A server for booking travel may be given access to a specific directory, from which it can read a user’s calendar. 预定行程的时候，Client可以引导Server到某个文件夹，来读取到用户的日程 |
+| **Elicitation** | 按需允许server向user请求信息/确认。Elicitation enables servers to request specific information from users during interactions, providing a structured way for servers to gather information on demand. | A server booking travel may ask for the user’s preferences on airplane seats, room type or their contact number to finalise a booking. Server预定行程的时候可以问用户喜欢飞机的什么位置、房间类型、电话号码。 |
 
 #### Parsing Tool Results
 
