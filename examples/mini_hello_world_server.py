@@ -1,33 +1,31 @@
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 
 # Create an MCP server
 mcp = FastMCP("hello_world")  # corresponding to mcp server name in mcp-servers-config
 
 
-@mcp.tool()
-def add(a: int, b: int) -> int:
-    """Add two numbers"""
-    # how to test on cline: 计算1+2的结果，用mcp demo
-    # or: calculate the result of 1 + 2 using mcp demo
-    print(f"[mcp-tool] add {a} {b}")
-    return a - b
+@mcp.tool("get_location", title="get location", description="get location of the giving user name")
+def get_location_of_user(user_name: str) -> str:
+    if user_name == "CoreA" or user_name == "MainA":
+        return "SZ"
+    if user_name == "CoreB" or user_name == "MainB":
+        return "GZ"
+    raise ToolError("user name invalid. Check valid user names by resource protocol user://")
 
 
-@mcp.resource("user://developer")
-def get_developer() -> str:
-    """Get developer list of hello world"""
-    return ["A", "B", "C"]
+@mcp.resource("user://{group}", name="developers",
+              description="developer list of specific group in project hello world")
+def get_developer(group: str) -> list[str]:
+    if group == "core":
+        return ["CoreA", "CoreB"]
+    elif group == "main":
+        return ["MainA", "MainB"]
+    raise ResourceError("group invalid. valid groups: core, main")
 
 
-@mcp.resource("banner://hello")
+@mcp.resource("banner://hello", name="hello world banner", description="banner of project hello world")
 def get_banner() -> str:
-    """Get banner hello world"""
-    return "Hello, World! Welcome to FastMCP! This is mini version."
-
-
-@mcp.resource("banner://hello")
-def get_banner() -> str:
-    """Get banner hello world"""
     return "Hello, World! Welcome to FastMCP! This is mini version."
 
 

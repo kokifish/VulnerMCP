@@ -50,16 +50,16 @@ for module_method_name in module_method_name_l:
     create_panda_resource_function(module_method_name)
 
 
-@mcp.resource("panda://{module_method_name}", name="ArkTS Panda Assembly code",
-              title=f"ArkTS Assembly code of {module_method_name}",
-              description=f"The ArkTS assembly code (Panda Assembly format) of {module_method_name}. Valid resource URL example: panda://Index%26.%23%2A%23 (for specific match of Index&.#*# using URL encoding), panda://*module_name* (for wildcard matching of all methods in module/class named `module_name`). Check URL encoding or use wildcard matching if it still failed.")
-def read_panda_assembly_template(module_method_name: str) -> str:
-    Log.info(f"mcp resource template read: {module_method_name}")
+@mcp.resource("panda://{mm_name}", name="ArkTS Panda Assembly code",
+              title=f"ArkTS Assembly code of specific module method name",
+              description=f"The ArkTS assembly code (Panda Assembly format) of specific module method name. Valid resource URL example: panda://Index%26.%23%2A%23 (for specific match of Index&.#*# using URL encoding), panda://*module_name* (for wildcard matching of all methods in module/class named `module_name`). Check URL encoding or use wildcard matching if it still failed.")
+def read_panda_assembly_template(mm_name: str) -> str:
+    Log.info(f"mcp resource template read: {mm_name}")
     try:
-        contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(f"panda://{module_method_name}"))
+        contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(f"panda://{mm_name}"))
         Log.info(f"mcp resource template read: return len={len(contents)}")
     except Exception as e:
-        contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(f"panda://{unquote(module_method_name)}"))
+        contents: list[str] = arkts_api.read_pa_by_url(AnyUrl(f"panda://{unquote(mm_name)}"))
         Log.info(f"mcp resource template read: unquote return len={len(contents)}")
     return "\n".join(contents)
 
