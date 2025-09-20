@@ -1,6 +1,19 @@
-from mcp.server.fastmcp import FastMCP
+import logging
+import os
+import sys
+from logging.handlers import RotatingFileHandler
+
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 from mcp.server.fastmcp.prompts import base
+
+GIT_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)
+log_name = "hello_world"
+log_file = os.path.join(GIT_ROOT_PATH, log_name + ".log")
+Log = logging.getLogger(log_name)
+handle = RotatingFileHandler(log_file, mode="a", maxBytes=50 * 1024 * 1024, backupCount=10, encoding="utf-8", delay=0)
+Log.addHandler(handle)
 
 # Create an MCP server
 mcp = FastMCP("hello_world")  # corresponding to mcp server name in mcp-servers-config
@@ -8,7 +21,8 @@ mcp = FastMCP("hello_world")  # corresponding to mcp server name in mcp-servers-
 
 @mcp.tool("get_location", title="get location",  # tool
           description="get location of the giving user name")
-def get_location_of_user(user_name: str) -> str:
+def get_location_of_user(user_name: str, ctx: Context) -> str:
+    Log.info(f"tool: user_name {user_name} {ctx.model_config} {ctx.fastmcp.name} | {ctx.session.client_params}")
     if user_name == "CoreA" or user_name == "MainA":
         return "SZ"
     if user_name == "CoreB" or user_name == "MainB":
